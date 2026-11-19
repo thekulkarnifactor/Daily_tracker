@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}Daily Tracker{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ app_version }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="toasts" role="status" aria-live="polite">
+        {% for category, message in messages %}
+          <div class="toast toast-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ app_version }}" defer></script>
+</body>
+</html>

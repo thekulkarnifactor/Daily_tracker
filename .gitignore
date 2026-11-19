@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# credentials — never commit
+service-account*.json
+*-credentials.json
+client_secret*.json
+
+# local workbooks (your data lives in Google Sheets)
+*.xlsx
+~$*.xlsx
+!tests/fixtures/*.xlsx

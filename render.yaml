@@ -1,0 +1,30 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Dashboard → New → Blueprint → pick this repo. Fill the "sync: false" values when prompted.
+services:
+  - type: web
+    name: daily-tracker
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: STORAGE_BACKEND
+        value: sheets
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: ALLOWED_EMAILS
+        sync: false
