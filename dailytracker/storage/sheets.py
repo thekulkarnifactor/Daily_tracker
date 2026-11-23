@@ -34,10 +34,17 @@ def _wrap_errors(func):
                 "Google Sheet not found. Check GOOGLE_SHEET_ID and share the sheet with "
                 f"{self.service_account_email} as an Editor."
             ) from exc
+        except PermissionError as exc:  # gspread raises this (without a message) on HTTP 403
+            raise StorageError(
+                "Permission denied by Google. Share the Daily sheet with "
+                f"{self.service_account_email} as an Editor, and make sure the Google Sheets API "
+                "is enabled in the service account's Cloud project."
+            ) from exc
         except gspread.exceptions.APIError as exc:
             raise StorageError(f"Google Sheets API error: {exc}") from exc
         except Exception as exc:
-            raise StorageError(f"Google Sheets request failed: {exc}") from exc
+            detail = str(exc) or type(exc).__name__
+            raise StorageError(f"Google Sheets request failed: {detail}") from exc
 
     return wrapper
 

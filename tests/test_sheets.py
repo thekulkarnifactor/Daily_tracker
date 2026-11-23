@@ -116,3 +116,15 @@ def test_missing_date_row_is_appended(sheets):
     sheets.save_entry(DayEntry(dt.date(2026, 11, 3), project="New"))
     assert ws.cells[(3, 2)] == "New" and ws.row_count >= 3
     assert sheets.get_entry(dt.date(2026, 11, 2)).project == "Old"
+
+
+def test_permission_error_explained(sheets):
+    class Denied(FakeSpreadsheet):
+        def worksheets(self):
+            raise PermissionError
+
+    sheets._spreadsheet = Denied()
+    from dailytracker.storage import StorageError
+
+    with pytest.raises(StorageError, match="Share the Daily sheet with sa@test"):
+        sheets.list_tabs()
