@@ -58,10 +58,12 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
     csrf.init_app(app)
 
     from .auth import init_auth
+    from .templates_views import bp as tpl_bp
     from .views import bp as main_bp
 
     init_auth(app)
     app.register_blueprint(main_bp)
+    app.register_blueprint(tpl_bp)
 
     @app.context_processor
     def inject_globals():

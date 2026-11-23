@@ -87,6 +87,7 @@ def dashboard():
         statuses=STATUSES,
         today=t,
         backend=storage().name,
+        templates=[t.to_dict() for t in storage().list_templates()],
     )
 
 

@@ -1,27 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ month_label }} · Daily Tracker{% endblock %}
 {% block content %}
-<header class="topbar">
-  <div class="brand"><span class="brand-mark"></span> Daily Tracker</div>
-  <div class="topbar-right">
-    <span class="source" title="Data source">
-      <span class="dot dot-ok"></span>
-      {% if backend == 'sheets' %}Google Sheet{% else %}Excel file{% endif %}{% if tab %} · tab <b>{{ tab }}</b>{% endif %}
-    </span>
-    <form method="post" action="{{ url_for('main.sync') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-ghost" type="submit" title="Reload changes made directly in the sheet">↻ Sync</button>
-    </form>
-    <div class="user">
-      {% if user.picture %}<img src="{{ user.picture }}" alt="" referrerpolicy="no-referrer">{% endif %}
-      <span class="user-email">{{ user.email }}</span>
-      <form method="post" action="{{ url_for('auth.logout') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-ghost btn-sm" type="submit">Sign out</button>
-      </form>
-    </div>
-  </div>
-</header>
+{% set active = "calendar" %}{% include "_topbar.html" %}
 
 <main class="wrapper">
   <section class="month-bar">
@@ -43,6 +23,7 @@
         </select>
         <noscript><button class="btn btn-ghost" type="submit">Go</button></noscript>
       </form>
+      <a class="btn btn-ghost" href="{{ url_for('tpl.templates', month=month_param) }}#apply">▦ Fill with template</a>
       <a class="btn btn-ghost" href="{{ url_for('main.export_csv', month=month_param) }}">⤓ CSV</a>
     </div>
   </section>
@@ -112,6 +93,14 @@
       <button type="button" class="btn btn-icon js-close" aria-label="Close">×</button>
     </header>
 
+    <div class="tpl-row">
+      <label for="f-template">Start from a template</label>
+      <select id="f-template" class="select">
+        <option value="">{% if templates %}— Choose a template —{% else %}No templates yet{% endif %}</option>
+        {% for t in templates %}<option value="{{ loop.index0 }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </div>
+
     <label for="f-project">Project</label>
     <input id="f-project" name="project" maxlength="120" required autocomplete="off" list="project-list">
     <datalist id="project-list">
@@ -144,6 +133,7 @@
 
     <footer class="dialog-foot">
       <button type="submit" form="clear-form" class="btn btn-danger" id="f-clear">Clear day</button>
+      <button type="button" class="btn btn-ghost" id="f-save-template" title="Save these fields as a reusable template">☆ Save as template</button>
       <span class="spacer"></span>
       <button type="button" class="btn btn-ghost js-close">Cancel</button>
       <button type="submit" class="btn btn-primary">Save</button>
@@ -153,5 +143,13 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="date" id="c-date">
   </form>
+  <form method="post" action="{{ url_for('tpl.save_template') }}" id="template-form" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ url_for('main.dashboard', month=month_param) }}">
+    {% for f in ['name', 'project', 'category', 'details', 'assignee', 'status'] %}
+      <input type="hidden" name="{{ f }}" id="t-{{ f }}">
+    {% endfor %}
+  </form>
 </dialog>
+<script type="application/json" id="templates-data">{{ templates | tojson }}</script>
 {% endblock %}

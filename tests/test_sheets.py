@@ -3,6 +3,7 @@
 import datetime as dt
 import re
 
+import gspread
 import pytest
 
 from dailytracker.model import DayEntry, date_to_serial
@@ -16,7 +17,7 @@ def _a1(ref):
 
 class FakeWorksheet:
     def __init__(self, title, rows, sid):
-        self.title, self.row_count, self.id = title, rows, sid
+        self.title, self.row_count, self.id, self.col_count = title, rows, sid, 6
         self.cells: dict[tuple[int, int], object] = {}
         self.formats = []
 
@@ -46,6 +47,19 @@ class FakeWorksheet:
         assert value_input_option.value == "RAW"
         self._put(range_name.split(":")[0], values)
 
+    def get_all_values(self):
+        if not self.cells:
+            return []
+        last_r = max(r for r, _ in self.cells)
+        last_c = max(c for _, c in self.cells)
+        return [[str(self.cells.get((r, c), "")) for c in range(1, last_c + 1)] for r in range(1, last_r + 1)]
+
+    def clear(self):
+        self.cells.clear()
+
+    def resize(self, rows=None, cols=None):
+        self.row_count, self.col_count = rows or self.row_count, cols or self.col_count
+
     def add_rows(self, n):
         self.row_count += n
 
@@ -62,7 +76,10 @@ class FakeSpreadsheet:
         return list(self.sheets)
 
     def worksheet(self, title):
-        return next(s for s in self.sheets if s.title == title)
+        for s in self.sheets:
+            if s.title == title:
+                return s
+        raise gspread.exceptions.WorksheetNotFound(title)
 
     def add_worksheet(self, title, rows, cols, index=None):
         ws = FakeWorksheet(title, rows, len(self.sheets) + 100)
@@ -128,3 +145,29 @@ def test_permission_error_explained(sheets):
 
     with pytest.raises(StorageError, match="Share the Daily sheet with sa@test"):
         sheets.list_tabs()
+
+
+def test_templates_and_month_style_roundtrip(sheets):
+    from dailytracker.model import EntryTemplate
+    from dailytracker.storage.style import MonthStyle
+
+    sheets.save_template(EntryTemplate("Standup", project="BnB", status="Done"))
+    assert [t.name for t in sheets.list_templates()] == ["Standup"]
+    assert sheets.spreadsheet.worksheet("Templates").cells[(1, 1)] == "Name"
+
+    look = MonthStyle(header_bg="#112233", spacer_rows=False, merge_weekends=False)
+    sheets.save_month_style(look)
+    hide = [
+        r for r in sheets.spreadsheet.requests if r.get("updateSheetProperties", {}).get("fields") == "hidden"
+    ]
+    assert hide, "_config tab should be hidden"
+    sheets.refresh()
+    assert sheets.month_style().header_bg == "112233"
+
+    sheets.save_entry(DayEntry(dt.date(2026, 12, 1), project="x"))
+    titles = [s.title for s in sheets.spreadsheet.sheets]
+    assert titles.index("Dec-26") < titles.index("Templates")  # months stay before meta tabs
+    ws = sheets.spreadsheet.worksheet("Dec-26")
+    # no spacer rows: day N is on row N+1
+    assert ws.cells[(32, 1)] == date_to_serial(dt.date(2026, 12, 31))
+    assert not any("mergeCells" in r for r in sheets.spreadsheet.requests)

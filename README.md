@@ -13,6 +13,9 @@ database: every save in the app is written straight into the month tab (`Nov-26`
 - **One-click log entry.** Project (with autocomplete), task category, details, assigned by and status. Ctrl/Cmd+Enter saves.
 - **Google Sheets storage.** Keeps your existing layout: same columns, weekday colours, merged weekend blocks and `MMM-YY` tab names. Missing month tabs are created, styled, when you first log a day in them.
 - **Reads legacy tabs** such as `Sept-23` and `June-25`, both MM/DD and DD/MM date text, and rows where the date cell was left blank.
+- **Entry templates.** Save entries you log often (e.g. "BnB – development", "Leave"), pick one in the day dialog to fill every field, or save the current day as a template. Templates are stored in a `Templates` tab of your sheet, so you can edit them there too.
+- **Bulk apply.** Apply a template to a date range (up to 120 days). Weekends are skipped, and days you've already logged are kept unless you choose *Overwrite*.
+- **Month sheet template.** Change the headers, colours (header row plus each weekday), column widths, font, weekend label, spacer rows and weekend merging used for **new** month tabs, with a live preview. Settings are stored in a hidden `_config` tab. Existing tabs are never changed, and *Reset to original* restores the default design.
 - **Metrics.** Workdays so far, logged, done, in progress, leave, and days not logged yet.
 - **CSV export** per month, plus a JSON API at `/api/month/2026-11`.
 - **Google sign-in** limited to the email addresses you allow.
@@ -112,6 +115,8 @@ All settings are environment variables; see [`.env.example`](.env.example). With
 | `POST /entry`, `POST /entry/clear` | Save or clear a day (CSRF-protected) |
 | `POST /sync` | Drop the cache and re-read the sheet |
 | `GET /api/month/2026-11` | JSON for a month |
+| `GET /templates`, `POST /templates/save`, `/templates/delete`, `/templates/apply` | Entry templates and bulk apply |
+| `GET /month-template`, `POST /month-template`, `/month-template/reset`, `/month-template/create` | Month sheet template |
 | `GET /export/2026-11.csv` | CSV export |
 | `GET /healthz`, `GET /readyz` | Liveness, and readiness (checks Google Sheet access) |
 

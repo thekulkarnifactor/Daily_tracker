@@ -15,9 +15,10 @@ import gspread
 from gspread.http_client import BackOffHTTPClient
 from gspread.utils import DateTimeOption, ValueInputOption, ValueRenderOption
 
-from ..model import HEADERS, date_to_serial, month_layout, parse_tab_name, placeholder_values, tab_name
+from ..model import date_to_serial, month_layout, parse_tab_name, placeholder_values, tab_name
 from . import style
 from .base import RawRow, Storage, StorageError
+from .style import MonthStyle
 
 log = logging.getLogger(__name__)
 
@@ -114,36 +115,46 @@ class SheetsStorage(Storage):
     @_wrap_errors
     def _create_tab(self, year: int, month: int, prefill) -> str:
         prefill = prefill or {}
+        look = self.month_style()
         name = tab_name(year, month)
-        layout = month_layout(year, month)
-        values: list[list] = [HEADERS]
+        layout = month_layout(year, month, look.spacer_rows)
+        values: list[list] = [look.headers]
         for d in layout:
             if d is None:
                 values.append([""] * 6)
             else:
-                values.append([date_to_serial(d), *(prefill.get(d) or placeholder_values(d))])
+                values.append(
+                    [date_to_serial(d), *(prefill.get(d) or placeholder_values(d, look.weekend_label))]
+                )
 
         ws = self.spreadsheet.add_worksheet(
             title=name, rows=len(values), cols=6, index=self._insert_index(year, month)
         )
         ws.update(values=values, range_name="A1", value_input_option=ValueInputOption.raw)
-        self.spreadsheet.batch_update({"requests": self._format_requests(ws.id, layout)})
+        self.spreadsheet.batch_update({"requests": self._format_requests(ws.id, layout, look)})
         log.info("created tab %s", name)
         return name
 
     # ------------------------------------------------------------- helpers
 
     def _insert_index(self, year: int, month: int) -> int:
-        """Position that keeps tabs in chronological order."""
+        """Position that keeps month tabs in chronological order (other tabs stay after them)."""
         tabs = self._list_tabs()
+        last_month_idx = -1
         for idx, title in enumerate(tabs):
             parsed = parse_tab_name(title)
             if parsed and parsed > (year, month):
                 return idx
-        return len(tabs)
+            if parsed:
+                last_month_idx = idx
+        return last_month_idx + 1  # 0 when there are no month tabs yet
 
     @staticmethod
-    def _format_requests(sheet_id: int, layout: list[dt.date | None]) -> list[dict]:
+    def _format_requests(
+        sheet_id: int, layout: list[dt.date | None], look: MonthStyle | None = None
+    ) -> list[dict]:
+        look = look or MonthStyle()
+
         def grid(r0, r1, c0=0, c1=6):
             return {
                 "sheetId": sheet_id,
@@ -158,8 +169,8 @@ class SheetsStorage(Storage):
                 "backgroundColor": style.hex_to_rgb(bg),
                 "textFormat": {
                     "foregroundColor": style.hex_to_rgb(fg),
-                    "fontFamily": "Calibri",
-                    "fontSize": 11,
+                    "fontFamily": look.font,
+                    "fontSize": look.font_size,
                     "bold": bold,
                 },
                 "verticalAlignment": "MIDDLE",
@@ -173,7 +184,7 @@ class SheetsStorage(Storage):
                     "range": grid(0, 1),
                     "cell": {
                         "userEnteredFormat": cell_format(
-                            style.HEADER_BG, style.HEADER_FG, bold=True, h_align="CENTER"
+                            look.header_bg, look.header_fg, bold=True, h_align="CENTER"
                         )
                     },
                     "fields": fields,
@@ -186,7 +197,7 @@ class SheetsStorage(Storage):
                 }
             },
         ]
-        for idx, width in enumerate(style.COLUMN_WIDTHS):
+        for idx, width in enumerate(look.column_widths):
             requests.append(
                 {
                     "updateDimensionProperties": {
@@ -205,7 +216,7 @@ class SheetsStorage(Storage):
         for offset, d in enumerate(layout, start=1):  # row index 0 is the header
             if d is None:
                 continue
-            bg, fg = style.WEEKDAY_COLORS[d.weekday()]
+            bg, fg = look.colors(d.weekday())
             requests.append(
                 {
                     "repeatCell": {
@@ -225,7 +236,7 @@ class SheetsStorage(Storage):
                         }
                     }
                 )
-            if d.weekday() == 6 and offset >= 2 and layout[offset - 2] is not None:
+            if look.merge_weekends and d.weekday() == 6 and offset >= 2 and layout[offset - 2] is not None:
                 requests.append(
                     {
                         "mergeCells": {
@@ -246,7 +257,7 @@ class SheetsStorage(Storage):
                 }
             }
         )
-        border = {"style": "SOLID", "color": style.hex_to_rgb(style.BORDER)}
+        border = {"style": "SOLID", "color": style.hex_to_rgb(look.border)}
         requests.append(
             {
                 "updateBorders": {
@@ -261,3 +272,49 @@ class SheetsStorage(Storage):
             }
         )
         return requests
+
+    @_wrap_errors
+    def _read_meta(self, tab: str) -> list[list[str]]:
+        try:
+            ws = self._ws(tab)
+        except gspread.exceptions.WorksheetNotFound:
+            return []
+        return ws.get_all_values()
+
+    @_wrap_errors
+    def _write_meta(self, tab: str, rows: list[list[str]], hidden: bool = False) -> None:
+        width = max((len(r) for r in rows), default=1)
+        try:
+            ws = self._ws(tab)
+            ws.clear()
+            if ws.row_count < len(rows) or ws.col_count < width:
+                ws.resize(rows=max(ws.row_count, len(rows)), cols=max(ws.col_count, width))
+        except gspread.exceptions.WorksheetNotFound:
+            ws = self.spreadsheet.add_worksheet(title=tab, rows=max(len(rows), 10), cols=max(width, 6))
+            requests = [
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1},
+                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                        "fields": "userEnteredFormat.textFormat.bold",
+                    }
+                },
+                {
+                    "updateSheetProperties": {
+                        "properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1}},
+                        "fields": "gridProperties.frozenRowCount",
+                    }
+                },
+            ]
+            if hidden:
+                requests.append(
+                    {
+                        "updateSheetProperties": {
+                            "properties": {"sheetId": ws.id, "hidden": True},
+                            "fields": "hidden",
+                        }
+                    }
+                )
+            self.spreadsheet.batch_update({"requests": requests})
+        if rows:
+            ws.update(values=rows, range_name="A1", value_input_option=ValueInputOption.raw)

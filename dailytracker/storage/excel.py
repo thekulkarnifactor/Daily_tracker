@@ -10,13 +10,14 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from ..model import HEADERS, month_layout, placeholder_values, tab_name
+from ..model import month_layout, parse_tab_name, placeholder_values, tab_name
 from . import style
 from .base import RawRow, Storage, StorageError
+from .style import MonthStyle
 
 
-def _border() -> Border:
-    side = Side(style="thin", color=style.BORDER)
+def _border(color: str) -> Border:
+    side = Side(style="thin", color=color)
     return Border(left=side, right=side, top=side, bottom=side)
 
 
@@ -27,27 +28,30 @@ def set_text(cell, value) -> None:
         cell.data_type = "s"
 
 
-def style_month_sheet(ws, year: int, month: int, prefill: dict | None = None) -> None:
-    """Lay out and style a month tab exactly like the original workbook."""
+def style_month_sheet(
+    ws, year: int, month: int, prefill: dict | None = None, look: MonthStyle | None = None
+) -> None:
+    """Lay out and style a month tab using the month template (default: the original design)."""
     prefill = prefill or {}
-    border = _border()
-    ws.append(HEADERS)
+    look = look or MonthStyle()
+    border = _border(look.border)
+    ws.append(look.headers)
     ws.row_dimensions[1].height = style.HEADER_HEIGHT
     for col in range(1, 7):
         cell = ws.cell(row=1, column=col)
-        cell.fill = PatternFill("solid", start_color=style.HEADER_BG, end_color=style.HEADER_BG)
-        cell.font = Font(name="Calibri", size=11, bold=True, color=style.HEADER_FG)
+        cell.fill = PatternFill("solid", start_color=look.header_bg, end_color=look.header_bg)
+        cell.font = Font(name=look.font, size=look.font_size, bold=True, color=look.header_fg)
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = border
 
     row = 2
-    for d in month_layout(year, month):
+    for d in month_layout(year, month, look.spacer_rows):
         if d is None:
             ws.row_dimensions[row].height = style.SPACER_HEIGHT
             row += 1
             continue
-        bg, fg = style.WEEKDAY_COLORS[d.weekday()]
-        values = prefill.get(d) or placeholder_values(d)
+        bg, fg = look.colors(d.weekday())
+        values = prefill.get(d) or placeholder_values(d, look.weekend_label)
         date_cell = ws.cell(row=row, column=1, value=d)
         date_cell.number_format = "mm/dd/yyyy"
         for offset, value in enumerate(values, start=2):
@@ -56,18 +60,18 @@ def style_month_sheet(ws, year: int, month: int, prefill: dict | None = None) ->
         for col in range(1, 7):
             cell = ws.cell(row=row, column=col)
             cell.fill = PatternFill("solid", start_color=bg, end_color=bg)
-            cell.font = Font(name="Calibri", size=11, color=fg)
+            cell.font = Font(name=look.font, size=look.font_size, color=fg)
             cell.border = border
             cell.alignment = Alignment(
                 vertical="center", horizontal="center" if col in (1, 6) else "left", wrap_text=col == 4
             )
-        if d.weekday() == 6 and row > 2 and ws.cell(row=row - 1, column=1).value:
+        if look.merge_weekends and d.weekday() == 6 and row > 2 and ws.cell(row=row - 1, column=1).value:
             for col in range(3, 7):
                 ws.merge_cells(start_row=row - 1, start_column=col, end_row=row, end_column=col)
                 ws.cell(row=row - 1, column=col).alignment = Alignment(horizontal="center", vertical="center")
         row += 1
 
-    for idx, width in enumerate(style.COLUMN_WIDTHS, start=1):
+    for idx, width in enumerate(look.column_widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
     ws.freeze_panes = "A2"
 
@@ -95,6 +99,11 @@ class ExcelStorage(Storage):
 
     def _save(self, wb) -> None:
         """Atomic save: write to a temp file then swap, so a crash never corrupts the workbook."""
+        # Keep the settings tab hidden (Excel needs at least one other visible sheet).
+        if "_config" in wb.sheetnames and len(wb.sheetnames) > 1:
+            wb["_config"].sheet_state = "hidden"
+            if wb.active is not None and wb.active.title == "_config":
+                wb.active = next(i for i, ws in enumerate(wb.worksheets) if ws.title != "_config")
         directory = os.path.dirname(os.path.abspath(self.path))
         fd, tmp = tempfile.mkstemp(suffix=".xlsx", dir=directory)
         os.close(fd)
@@ -152,10 +161,34 @@ class ExcelStorage(Storage):
         wb = self._load(create=True)
         name = tab_name(year, month)
         ws = wb.create_sheet(title=name)
-        style_month_sheet(ws, year, month, prefill)
-        # keep tabs in chronological order
-        from ..model import parse_tab_name
-
+        style_month_sheet(ws, year, month, prefill, self.month_style())
+        # keep month tabs in chronological order, other tabs (Templates, _config) last
         wb._sheets.sort(key=lambda s: parse_tab_name(s.title) or (9999, 12))
         self._save(wb)
         return name
+
+    def _read_meta(self, tab: str) -> list[list[str]]:
+        if not os.path.exists(self.path):
+            return []
+        wb = self._load(data_only=True)
+        try:
+            if tab not in wb.sheetnames:
+                return []
+            return [
+                list(r) for r in wb[tab].iter_rows(values_only=True) if any(c not in (None, "") for c in r)
+            ]
+        finally:
+            wb.close()
+
+    def _write_meta(self, tab: str, rows: list[list[str]], hidden: bool = False) -> None:
+        wb = self._load(create=True)
+        if tab in wb.sheetnames:
+            del wb[tab]
+        ws = wb.create_sheet(title=tab)
+        for r, row in enumerate(rows, start=1):
+            for c, value in enumerate(row, start=1):
+                set_text(ws.cell(row=r, column=c), value)
+        if rows:
+            for c in range(1, len(rows[0]) + 1):
+                ws.cell(row=1, column=c).font = Font(bold=True)
+        self._save(wb)

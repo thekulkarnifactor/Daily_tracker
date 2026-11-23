@@ -13,11 +13,24 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
-from ..model import DayEntry, match_tab, month_layout, parse_date, parse_tab_name, shift_month
+from ..model import (
+    TEMPLATE_HEADERS,
+    DayEntry,
+    EntryTemplate,
+    match_tab,
+    month_layout,
+    parse_date,
+    parse_tab_name,
+    shift_month,
+)
+from .style import MonthStyle
 
 log = logging.getLogger(__name__)
 
 RawRow = tuple[int, list]  # (1-based row number, [A, B, C, D, E, F])
+
+TEMPLATES_TAB = "Templates"  # visible: editable straight in the sheet too
+CONFIG_TAB = "_config"  # hidden: key/value app settings (month template)
 
 
 class StorageError(RuntimeError):
@@ -31,6 +44,7 @@ class Storage(ABC):
         self._cache_ttl = cache_ttl
         self._cache: dict[str, tuple[float, list[RawRow]]] = {}
         self._tabs: tuple[float, list[str]] | None = None
+        self._meta_cache: dict[str, tuple[float, list[list[str]]]] = {}
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------ backend hooks
@@ -52,6 +66,14 @@ class Storage(ABC):
     @abstractmethod
     def _create_tab(self, year: int, month: int, prefill: dict[dt.date, list[str]] | None) -> str: ...
 
+    @abstractmethod
+    def _read_meta(self, tab: str) -> list[list[str]]:
+        """All values of a non-month tab as text ([] if the tab doesn't exist)."""
+
+    @abstractmethod
+    def _write_meta(self, tab: str, rows: list[list[str]], hidden: bool = False) -> None:
+        """Replace the whole content of a non-month tab, creating it if needed."""
+
     def ping(self) -> None:
         """Raise if the backend is unreachable."""
         self._list_tabs()
@@ -61,6 +83,7 @@ class Storage(ABC):
     def refresh(self) -> None:
         with self._lock:
             self._cache.clear()
+            self._meta_cache.clear()
             self._tabs = None
 
     def list_tabs(self) -> list[str]:
@@ -108,7 +131,7 @@ class Storage(ABC):
                     continue
                 previous = d
                 found[d] = DayEntry(d, *cells[1:6], row=row_no)
-        days = [d for d in month_layout(year, month) if d]
+        days = [d for d in month_layout(year, month, spacers=False) if d]
         return [found.get(d) or DayEntry(d) for d in days]
 
     def get_entry(self, date: dt.date) -> DayEntry:
@@ -158,6 +181,7 @@ class Storage(ABC):
                 self.refresh()
                 return len(prefill)
             self._invalidate(tab)
+            appended = 0
             updates: dict[int, list[str]] = {}
             for entry in self.get_month(year, month):
                 values = prefill.get(entry.date)
@@ -169,10 +193,11 @@ class Storage(ABC):
                     updates[entry.row] = values
                 else:
                     self._append_row(tab, entry.date, values)
+                    appended += 1
             if updates:
                 self._write_rows(tab, updates)
             self._invalidate(tab)
-            return len(updates)
+            return len(updates) + appended
 
     def available_months(self, start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
         """Months between start and end, plus any month that already has a tab."""
@@ -189,3 +214,106 @@ class Storage(ABC):
         except StorageError:
             log.exception("could not list tabs")
         return sorted(months)
+
+    # ------------------------------------------------------------ meta tabs
+
+    def _meta(self, tab: str) -> list[list[str]]:
+        with self._lock:
+            hit = self._meta_cache.get(tab)
+            if hit and time.monotonic() - hit[0] < self._cache_ttl:
+                return hit[1]
+            rows = [[("" if c is None else str(c)) for c in row] for row in self._read_meta(tab)]
+            self._meta_cache[tab] = (time.monotonic(), rows)
+            return rows
+
+    def _put_meta(self, tab: str, rows: list[list[str]], hidden: bool = False) -> None:
+        with self._lock:
+            self._write_meta(tab, rows, hidden)
+            self._meta_cache.pop(tab, None)
+            self._tabs = None
+
+    # ------------------------------------------------------- entry templates
+
+    def list_templates(self) -> list[EntryTemplate]:
+        rows = self._meta(TEMPLATES_TAB)
+        templates: list[EntryTemplate] = []
+        seen: set[str] = set()
+        for row in rows[1:]:
+            cells = (list(row) + [""] * 6)[:6]
+            t = EntryTemplate(*cells)
+            if t.name and t.name.lower() not in seen:
+                seen.add(t.name.lower())
+                templates.append(t)
+        return templates
+
+    def get_template(self, name: str) -> EntryTemplate | None:
+        key = (name or "").strip().lower()
+        return next((t for t in self.list_templates() if t.name.lower() == key), None)
+
+    def save_template(self, template: EntryTemplate, original_name: str | None = None) -> None:
+        """Create or update a template (matched by name, case-insensitive). Supports renaming."""
+        if not template.name:
+            raise ValueError("Template name is required")
+        replace = {template.name.lower(), (original_name or "").strip().lower()} - {""}
+        with self._lock:
+            kept = [t for t in self.list_templates() if t.name.lower() not in replace]
+            self._store_templates(sorted([*kept, template], key=lambda t: t.name.lower()))
+
+    def delete_template(self, name: str) -> bool:
+        with self._lock:
+            templates = self.list_templates()
+            kept = [t for t in templates if t.name.lower() != (name or "").strip().lower()]
+            if len(kept) == len(templates):
+                return False
+            self._store_templates(kept)
+            return True
+
+    def _store_templates(self, templates: list[EntryTemplate]) -> None:
+        self._put_meta(TEMPLATES_TAB, [TEMPLATE_HEADERS, *[[t.name, *t.values()] for t in templates]])
+
+    def apply_template(
+        self, template: EntryTemplate, dates: list[dt.date], overwrite: bool = False
+    ) -> tuple[int, int]:
+        """Write a template into many days (weekends are skipped). Returns (written, skipped)."""
+        workdays = sorted({d for d in dates if d.weekday() < 5})
+        by_month: dict[tuple[int, int], dict[dt.date, list[str]]] = {}
+        for d in workdays:
+            by_month.setdefault((d.year, d.month), {})[d] = template.values()
+        written = 0
+        for (year, month), prefill in sorted(by_month.items()):
+            written += self.fill_month(year, month, prefill, overwrite=overwrite)
+        return written, len(workdays) - written
+
+    # -------------------------------------------------------- month template
+
+    def _config(self) -> dict[str, str]:
+        return {row[0]: row[1] for row in self._meta(CONFIG_TAB) if len(row) >= 2 and row[0]}
+
+    def month_style(self) -> MonthStyle:
+        try:
+            return MonthStyle.from_json(self._config().get("month_style"))
+        except StorageError:
+            log.exception("could not read month template; using defaults")
+            return MonthStyle()
+
+    def save_month_style(self, style: MonthStyle | None) -> None:
+        """Save the month template (``None`` resets to the original design)."""
+        with self._lock:
+            config = self._config()
+            if style is None:
+                config.pop("month_style", None)
+            else:
+                config["month_style"] = style.validate().to_json()
+            self._put_meta(
+                CONFIG_TAB, [["key", "value"], *[[k, v] for k, v in sorted(config.items())]], hidden=True
+            )
+
+    def create_month(self, year: int, month: int) -> str:
+        """Create a month tab now (using the month template) if it doesn't exist yet."""
+        with self._lock:
+            tab = self.find_tab(year, month)
+            if tab:
+                return tab
+            tab = self._create_tab(year, month, None)
+            self._tabs = None
+            return tab

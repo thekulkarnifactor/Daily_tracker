@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Month sheet template · Daily Tracker{% endblock %}
+{% block content %}
+{% set active = "month" %}{% include "_topbar.html" %}
+
+<main class="wrapper narrow">
+  <div class="page-head">
+    <h1>Month sheet template</h1>
+    <p class="muted">How a <b>new</b> month tab looks when it's created in your Google Sheet: headers, colours, column widths and layout.
+      Existing tabs are never changed.</p>
+  </div>
+
+  <form method="post" action="{{ url_for('tpl.save_month_template') }}" id="month-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <section class="panel">
+      <h2>Preview</h2>
+      <div class="sheet-preview" id="preview" data-font="{{ look.font }}">
+        <table>
+          <thead>
+            <tr>{% for i in range(6) %}<th data-col="{{ i }}">{{ look.headers[i] }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+            {% for wd in range(7) %}
+              {% if wd == 5 %}<tr class="spacer-row"><td colspan="6"></td></tr>{% endif %}
+              <tr data-wd="{{ wd }}">
+                <td>11/{{ '%02d' % (wd + 2) }}/2026</td>
+                <td>{% if wd == 5 %}Saturday{% elif wd == 6 %}Sunday{% else %}Project{% endif %}</td>
+                <td class="{% if wd >= 5 %}weekend-cell{% endif %}">{% if wd == 5 %}<span class="js-weekend-label">{{ look.weekend_label }}</span>{% elif wd < 5 %}Core Dev - Coding{% endif %}</td>
+                <td>{% if wd < 5 %}1. {{ weekday_names[wd] }} work…{% endif %}</td>
+                <td></td>
+                <td>{% if wd < 5 %}Done{% endif %}</td>
+              </tr>
+            {% endfor %}
+            <tr class="spacer-row"><td colspan="6"></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <section class="panel">
+        <h2>Columns</h2>
+        <div class="col-grid">
+          <span class="muted small">Header</span><span class="muted small">Width</span>
+          {% for i in range(6) %}
+            <input name="header_{{ i }}" value="{{ look.headers[i] }}" maxlength="40" required aria-label="Column {{ 'ABCDEF'[i] }} header" data-preview-header="{{ i }}">
+            <input name="width_{{ i }}" type="number" min="4" max="120" value="{{ look.column_widths[i] }}" aria-label="Column {{ 'ABCDEF'[i] }} width">
+          {% endfor %}
+        </div>
+        <p class="fine">Data is read by column position (A = Date … F = Status), so renaming headers is safe.</p>
+
+        <h2 class="mt">Text & layout</h2>
+        <div class="row-2">
+          <div>
+            <label for="m-font">Font</label>
+            <input id="m-font" name="font" value="{{ look.font }}" maxlength="40">
+          </div>
+          <div>
+            <label for="m-size">Font size</label>
+            <input id="m-size" name="font_size" type="number" min="6" max="24" value="{{ look.font_size }}">
+          </div>
+        </div>
+        <label for="m-weekend">Weekend label</label>
+        <input id="m-weekend" name="weekend_label" value="{{ look.weekend_label }}" maxlength="40" data-preview-weekend>
+        <label class="check"><input type="checkbox" name="spacer_rows" {% if look.spacer_rows %}checked{% endif %} data-preview-spacers> Blank spacer row around each weekend</label>
+        <label class="check"><input type="checkbox" name="merge_weekends" {% if look.merge_weekends %}checked{% endif %}> Merge Saturday + Sunday cells (Task → Status)</label>
+      </section>
+
+      <section class="panel">
+        <h2>Colours</h2>
+        <div class="color-grid">
+          <span></span><span class="muted small">Fill</span><span class="muted small">Text</span>
+          <span>Header row</span>
+          <input type="color" name="header_bg" value="#{{ look.header_bg }}" data-preview="header-bg" aria-label="Header fill">
+          <input type="color" name="header_fg" value="#{{ look.header_fg }}" data-preview="header-fg" aria-label="Header text">
+          {% for wd in range(7) %}
+            <span>{{ weekday_names[wd] }}</span>
+            <input type="color" name="bg_{{ wd }}" value="#{{ look.weekdays[wd][0] }}" data-preview="bg-{{ wd }}" aria-label="{{ weekday_names[wd] }} fill">
+            <input type="color" name="fg_{{ wd }}" value="#{{ look.weekdays[wd][1] }}" data-preview="fg-{{ wd }}" aria-label="{{ weekday_names[wd] }} text">
+          {% endfor %}
+          <span>Borders</span>
+          <input type="color" name="border" value="#{{ look.border }}" data-preview="border" aria-label="Border colour">
+          <span></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="form-actions sticky-actions">
+      <button class="btn btn-danger" type="submit" form="reset-form">Reset to original</button>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" type="submit">Save month template</button>
+    </div>
+  </form>
+  <form method="post" action="{{ url_for('tpl.reset_month_template') }}" id="reset-form" class="js-confirm" data-confirm="Reset the month template to the original design?" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+
+  <section class="panel">
+    <h2>Create upcoming month tabs</h2>
+    <p class="muted">Tabs are created automatically the first time you log a day in a month. Create them now if you want to see them in the sheet in advance.</p>
+    <div class="month-chips">
+      {% for value, label, exists in upcoming %}
+        <form method="post" action="{{ url_for('tpl.create_month_tab') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="month" value="{{ value }}">
+          <button class="btn btn-sm {{ 'btn-ghost' if exists else '' }}" type="submit" {% if exists %}disabled title="Tab already exists"{% endif %}>
+            {% if exists %}✓{% else %}+{% endif %} {{ label }}
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+  </section>
+</main>
+{% endblock %}

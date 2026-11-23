@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Templates · Daily Tracker{% endblock %}
+{% block content %}
+{% set active = "templates" %}{% include "_topbar.html" %}
+
+<main class="wrapper narrow">
+  <div class="page-head">
+    <h1>Entry templates</h1>
+    <p class="muted">Save entries you log often, then fill a day from the calendar or many days at once below.
+      Templates live in the <b>Templates</b> tab of your sheet, so you can edit them there too.</p>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <h2>{% if editing %}Edit “{{ editing.name }}”{% else %}New template{% endif %}</h2>
+      <form method="post" action="{{ url_for('tpl.save_template') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if editing %}<input type="hidden" name="original_name" value="{{ editing.name }}">{% endif %}
+
+        <label for="t-name">Template name</label>
+        <input id="t-name" name="name" maxlength="60" required placeholder="e.g. BnB – development" value="{{ editing.name if editing else '' }}">
+
+        <label for="t-project">Project</label>
+        <input id="t-project" name="project" maxlength="120" value="{{ editing.project if editing else '' }}">
+
+        <label for="t-category">Task category</label>
+        <select id="t-category" name="category" class="select select-full">
+          <option value="">—</option>
+          {% for c in categories %}
+            <option value="{{ c }}" {% if editing and editing.task == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+          {% if editing and editing.task and editing.task not in categories %}
+            <option value="{{ editing.task }}" selected>{{ editing.task }}</option>
+          {% endif %}
+        </select>
+
+        <label for="t-details">Task details</label>
+        <textarea id="t-details" name="details" rows="4" maxlength="5000" placeholder="1. Daily standup&#10;2. …">{{ editing.details if editing else '' }}</textarea>
+
+        <div class="row-2">
+          <div>
+            <label for="t-assignee">Assigned by</label>
+            <input id="t-assignee" name="assignee" maxlength="120" value="{{ editing.assignee if editing else '' }}">
+          </div>
+          <div>
+            <label for="t-status">Status</label>
+            <select id="t-status" name="status" class="select select-full">
+              {% for s in statuses %}
+                <option value="{{ s }}" {% if editing and editing.status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+              <option value="" {% if editing and not editing.status %}selected{% endif %}>—</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          {% if editing %}<a class="btn btn-ghost" href="{{ url_for('tpl.templates') }}">Cancel</a>{% endif %}
+          <button class="btn btn-primary" type="submit">{% if editing %}Save changes{% else %}Add template{% endif %}</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Your templates <span class="count">{{ items | length }}</span></h2>
+      {% if not items %}
+        <div class="empty">
+          <p>No templates yet.</p>
+          <p class="muted">Add one here, or open any day on the calendar and press <b>☆ Save as template</b>.</p>
+        </div>
+      {% endif %}
+      <ul class="tpl-list">
+        {% for t in items %}
+          <li class="tpl">
+            <div class="tpl-main">
+              <div class="tpl-name">{{ t.name }}</div>
+              <div class="tpl-meta">
+                {% if t.project %}<span class="proj">{{ t.project }}</span>{% endif %}
+                {% if t.task %}<span>{{ t.task }}</span>{% endif %}
+                {% if t.status %}<span class="pill {{ 'pill-green' if t.status == 'Done' else 'pill-amber' }}">{{ t.status }}</span>{% endif %}
+              </div>
+              {% if t.details %}<div class="details">{{ t.details }}</div>{% endif %}
+            </div>
+            <div class="tpl-actions">
+              <a class="btn btn-ghost btn-sm" href="{{ url_for('tpl.templates', use=t.name) }}#apply">Apply…</a>
+              <a class="btn btn-ghost btn-sm" href="{{ url_for('tpl.templates', edit=t.name) }}">Edit</a>
+              <form method="post" action="{{ url_for('tpl.delete_template') }}" class="js-confirm" data-confirm="Delete template “{{ t.name }}”?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <section class="panel" id="apply">
+    <h2>Apply a template to many days</h2>
+    <p class="muted">Fills every weekday in the range. Weekends are always skipped.</p>
+    {% if items %}
+    <form method="post" action="{{ url_for('tpl.apply_template') }}" class="apply-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div>
+        <label for="a-name">Template</label>
+        <select id="a-name" name="name" class="select select-full" required>
+          {% for t in items %}
+            <option value="{{ t.name }}" {% if t.name == apply_template %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="a-start">From</label>
+        <input id="a-start" type="date" name="start" value="{{ apply_start }}" required>
+      </div>
+      <div>
+        <label for="a-end">To</label>
+        <input id="a-end" type="date" name="end" value="{{ apply_end }}" required>
+      </div>
+      <fieldset class="radio-group">
+        <legend>Days already logged</legend>
+        <label class="radio"><input type="radio" name="mode" value="empty" checked> Keep them, fill empty days only</label>
+        <label class="radio"><input type="radio" name="mode" value="overwrite"> Overwrite them</label>
+      </fieldset>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Apply template</button>
+      </div>
+    </form>
+    {% else %}
+      <p class="muted">Create a template first.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

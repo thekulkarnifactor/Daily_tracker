@@ -127,19 +127,19 @@ def parse_date(value, year: int | None = None, month: int | None = None) -> dt.d
     return candidates[0]
 
 
-def month_layout(year: int, month: int) -> list[dt.date | None]:
+def month_layout(year: int, month: int, spacers: bool = True) -> list[dt.date | None]:
     """Row layout of a month tab below the header.
 
-    One row per day, with a blank spacer row before each Saturday (except at
-    the top) and after each Sunday — matching the original workbook design.
+    One row per day. With ``spacers`` (the original workbook design) a blank row
+    is added before each Saturday (except at the top) and after each Sunday.
     """
     rows: list[dt.date | None] = []
     for day in range(1, calendar.monthrange(year, month)[1] + 1):
         d = dt.date(year, month, day)
-        if d.weekday() == 5 and rows:
+        if spacers and d.weekday() == 5 and rows:
             rows.append(None)
         rows.append(d)
-        if d.weekday() == 6:
+        if spacers and d.weekday() == 6:
             rows.append(None)
     return rows
 
@@ -221,10 +221,10 @@ class DayEntry:
         return data
 
 
-def placeholder_values(d: dt.date) -> list[str]:
+def placeholder_values(d: dt.date, weekend_label: str = "Weekend") -> list[str]:
     """Default B..F values for a fresh row."""
     if d.weekday() == 5:
-        return ["Saturday", "Weekend", "", "", ""]
+        return ["Saturday", weekend_label, "", "", ""]
     if d.weekday() == 6:
         return ["Sunday", "", "", "", ""]
     return ["", "", "", "", ""]
@@ -254,3 +254,32 @@ def summarize(entries: list[DayEntry], today: dt.date | None = None) -> MonthSum
         in_progress=len([e for e in entries if e.state == "progress"]),
         leave=len([e for e in entries if e.state == "leave"]),
     )
+
+
+@dataclass
+class EntryTemplate:
+    """A reusable day entry, e.g. "BnB standup" or "Leave"."""
+
+    name: str
+    project: str = ""
+    task: str = ""
+    details: str = ""
+    assignee: str = ""
+    status: str = ""
+
+    def __post_init__(self) -> None:
+        self.name = _clean(self.name)[:60]
+        self.project = _clean(self.project)[:120]
+        self.task = _clean(self.task)[:120]
+        self.details = _clean(self.details)[:5000]
+        self.assignee = _clean(self.assignee)[:120]
+        self.status = _clean(self.status)[:40]
+
+    def values(self) -> list[str]:
+        return [self.project, self.task, self.details, self.assignee, self.status]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+TEMPLATE_HEADERS = ["Name", *HEADERS[1:]]
