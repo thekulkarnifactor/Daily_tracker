@@ -98,3 +98,24 @@ def test_weekend_with_project_label_only_is_weekend():
     sat = dt.date(2024, 1, 6)
     assert DayEntry(sat, project="SXR", task="Weekend").state == "weekend"
     assert DayEntry(sat, project="SXR", details="prod fix").state == "logged"
+
+
+def test_service_account_parsing(monkeypatch):
+    import base64
+    import json
+
+    from dailytracker.config import load_service_account_info
+
+    key = {"type": "service_account", "private_key": "x", "client_email": "a@b"}
+    for value in (
+        json.dumps(key),
+        "'" + json.dumps(key) + "'",
+        base64.b64encode(json.dumps(key).encode()).decode(),
+        "﻿" + json.dumps(key),
+    ):
+        monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", value)
+        assert load_service_account_info()["client_email"] == "a@b"
+    for bad in ("113309794645971820696", "service-account.json", '{"type": "x"}', "{not json"):
+        monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", bad)
+        with pytest.raises(RuntimeError, match="ENTIRE"):
+            load_service_account_info()

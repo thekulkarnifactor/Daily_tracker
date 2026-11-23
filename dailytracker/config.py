@@ -24,17 +24,48 @@ def _csv(name: str) -> list[str]:
     return [item.strip().lower() for item in raw.split(",") if item.strip()]
 
 
+_SA_HELP = (
+    "GOOGLE_SERVICE_ACCOUNT_JSON is not a valid service-account key. Paste the ENTIRE "
+    "downloaded key file, from the first '{' to the last '}' (it starts with "
+    '{"type": "service_account", ...), or base64 of that file. Not the key ID, '
+    "client ID or file name."
+)
+
+
+def _parse_service_account(raw: str) -> dict:
+    """Parse a service-account key pasted as JSON, quoted JSON, or base64 JSON.
+
+    Raises a RuntimeError with setup guidance (never echoing the secret) on failure.
+    """
+    text = raw
+    # Values pasted with surrounding quotes, e.g. '{...}' or "{...}"
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1].strip()
+    if not text.startswith("{"):
+        try:
+            text = base64.b64decode(text, validate=False).decode("utf-8").strip()
+        except (ValueError, UnicodeDecodeError):
+            raise RuntimeError(f"{_SA_HELP} (value starts with {raw[:1]!r}, length {len(raw)})") from None
+    try:
+        info = json.loads(text)
+        if isinstance(info, str):  # JSON that was itself JSON-encoded
+            info = json.loads(info)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{_SA_HELP} (JSON error: {exc.msg} at char {exc.pos})") from None
+    if not isinstance(info, dict) or info.get("type") != "service_account" or "private_key" not in info:
+        raise RuntimeError(f"{_SA_HELP} (parsed, but it has no type=service_account / private_key)")
+    return info
+
+
 def load_service_account_info() -> dict | None:
     """Return service-account credentials as a dict, or None if not configured.
 
     Accepts either ``GOOGLE_SERVICE_ACCOUNT_JSON`` (raw JSON or base64-encoded
     JSON) or ``GOOGLE_APPLICATION_CREDENTIALS`` (path to a JSON key file).
     """
-    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip().lstrip("﻿")
     if raw:
-        if not raw.startswith("{"):
-            raw = base64.b64decode(raw).decode("utf-8")
-        return json.loads(raw)
+        return _parse_service_account(raw)
     path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
     if path and os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
