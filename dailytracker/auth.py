@@ -40,7 +40,9 @@ def login_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
         if current_user() is None:
-            return redirect(url_for("auth.login", next=request.full_path))
+            # After signing in, return to the page — never to a POST-only form URL.
+            target = request.full_path if request.method == "GET" else url_for("main.dashboard")
+            return redirect(url_for("auth.login", next=target))
         return view(*args, **kwargs)
 
     return wrapped

@@ -155,3 +155,14 @@ def test_today_marker(client, monkeypatch):
 def test_login_page_renders(auth_app):
     resp = auth_app.test_client().get("/login")
     assert resp.status_code == 200 and b"Continue with Google" in resp.data
+
+
+def test_get_on_form_urls_redirects_home(client):
+    for url in ("/entry", "/entry/clear", "/sync"):
+        resp = client.get(url)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/")
+
+
+def test_unauthenticated_post_returns_to_dashboard_after_login(auth_app):
+    resp = auth_app.test_client().post("/entry", data={"date": "2026-11-17", "project": "x"})
+    assert "next=/" in resp.headers["Location"] and "entry" not in resp.headers["Location"]

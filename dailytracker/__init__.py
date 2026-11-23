@@ -94,7 +94,12 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
             "error.html", code=400, title="Session expired", message="Reload the page and try again."
         ), 400
 
-    for code, title in ((400, "Bad request"), (404, "Not found"), (500, "Something went wrong")):
+    for code, title in (
+        (400, "Bad request"),
+        (404, "Not found"),
+        (405, "Not allowed"),
+        (500, "Something went wrong"),
+    ):
 
         def handler(exc, code=code, title=title):
             message = getattr(exc, "description", "") if code != 500 else "Please try again."

@@ -172,6 +172,14 @@ def export_csv(month: str):
     )
 
 
+@bp.get("/entry")
+@bp.get("/entry/clear")
+@bp.get("/sync")
+def post_only_redirect():
+    """Typing/refreshing a form URL (e.g. after an error page) just goes back to the calendar."""
+    return redirect(url_for("main.dashboard"))
+
+
 @bp.get("/healthz")
 def healthz():
     return {"status": "ok"}
