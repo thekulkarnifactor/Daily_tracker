@@ -15,10 +15,12 @@ from abc import ABC, abstractmethod
 
 from ..model import (
     TEMPLATE_HEADERS,
+    Day,
     DayEntry,
     EntryTemplate,
     match_tab,
     month_layout,
+    normalize_items,
     parse_date,
     parse_tab_name,
     shift_month,
@@ -62,6 +64,14 @@ class Storage(ABC):
     @abstractmethod
     def _append_row(self, tab: str, date: dt.date, values: list[str]) -> int:
         """Append a dated row to the bottom of a tab and return its row number."""
+
+    @abstractmethod
+    def _insert_rows(self, tab: str, after_row: int, date: dt.date, values: list[list[str]]) -> None:
+        """Insert dated rows directly below ``after_row``, copying its formatting."""
+
+    @abstractmethod
+    def _delete_rows(self, tab: str, rows: list[int]) -> None:
+        """Delete the given rows (1-based)."""
 
     @abstractmethod
     def _create_tab(self, year: int, month: int, prefill: dict[dt.date, list[str]] | None) -> str: ...
@@ -112,92 +122,126 @@ class Storage(ABC):
     def find_tab(self, year: int, month: int) -> str | None:
         return match_tab(self.list_tabs(), year, month)
 
-    def get_month(self, year: int, month: int) -> list[DayEntry]:
-        """Every day of the month, in order. Days missing from the sheet come back empty."""
+    def _month_items(self, year: int, month: int) -> dict[dt.date, list[DayEntry]]:
+        """All rows of a month tab grouped by date (several rows = several projects that day)."""
         tab = self.find_tab(year, month)
-        found: dict[dt.date, DayEntry] = {}
-        if tab:
-            previous: dt.date | None = None
-            for row_no, cells in self._rows(tab):
-                cells = (list(cells) + [""] * 6)[:6]
-                d = parse_date(cells[0], year, month)
-                if d is None and previous and any(str(c or "").strip() for c in cells[1:]):
-                    # A row with content but a blank date cell, sitting right after a
-                    # dated row (seen in older sheets) belongs to the following day.
-                    candidate = previous + dt.timedelta(days=1)
-                    if candidate.month == month and candidate not in found:
-                        d = candidate
-                if not d or d.year != year or d.month != month or d in found:
-                    continue
-                previous = d
-                found[d] = DayEntry(d, *cells[1:6], row=row_no)
+        found: dict[dt.date, list[DayEntry]] = {}
+        if not tab:
+            return found
+        previous: dt.date | None = None
+        for row_no, cells in self._rows(tab):
+            cells = (list(cells) + [""] * 6)[:6]
+            d = parse_date(cells[0], year, month)
+            if d is None and previous and any(str(c or "").strip() for c in cells[1:]):
+                # A row with content but a blank date cell, sitting right after a
+                # dated row (seen in older sheets) belongs to the following day.
+                candidate = previous + dt.timedelta(days=1)
+                if candidate.month == month and candidate not in found:
+                    d = candidate
+            if not d or d.year != year or d.month != month:
+                continue
+            previous = d
+            found.setdefault(d, []).append(DayEntry(d, *cells[1:6], row=row_no))
+        return found
+
+    def get_month(self, year: int, month: int) -> list[Day]:
+        """Every day of the month, in order. Days missing from the sheet come back empty."""
+        found = self._month_items(year, month)
         days = [d for d in month_layout(year, month, spacers=False) if d]
-        return [found.get(d) or DayEntry(d) for d in days]
+        return [Day(d, found.get(d) or []) for d in days]
+
+    def get_day(self, date: dt.date) -> Day:
+        return Day(date, self._month_items(date.year, date.month).get(date) or [])
 
     def get_entry(self, date: dt.date) -> DayEntry:
-        for entry in self.get_month(date.year, date.month):
-            if entry.date == date:
-                return entry
-        return DayEntry(date)
+        """The day's main row (first project)."""
+        return self.get_day(date).primary
 
-    def save_entry(self, entry: DayEntry) -> DayEntry:
-        """Insert or update the row for ``entry.date``; creates the month tab if needed."""
+    def save_day(self, date: dt.date, items: list[DayEntry] | list[list[str]]) -> Day:
+        """Replace everything logged on ``date`` with ``items`` (one row per project).
+
+        The day's main row is updated in place; extra projects become extra rows
+        directly below it, and rows no longer needed are removed. An empty list
+        clears the day. Creates the month tab if needed.
+        """
+        values = normalize_items([i.values() if isinstance(i, DayEntry) else i for i in items])
         with self._lock:
-            year, month = entry.date.year, entry.date.month
-            tab = self.find_tab(year, month)
+            tab = self.find_tab(date.year, date.month)
             if not tab:
-                tab = self._create_tab(year, month, None)
+                tab = self._create_tab(date.year, date.month, None)
                 self._tabs = None
             self._invalidate(tab)
-            current = self.get_entry(entry.date)
-            if current.row:
-                self._write_rows(tab, {current.row: entry.values()})
-                entry.row = current.row
+            rows = sorted(i.row for i in self.get_day(date).items if i.row)
+            wanted = values or [[""] * 5]
+            if not rows:
+                for v in wanted:
+                    self._append_row(tab, date, v)
             else:
-                entry.row = self._append_row(tab, entry.date, entry.values())
+                keep = min(len(rows), len(wanted))
+                self._write_rows(tab, {rows[k]: wanted[k] for k in range(keep)})
+                if len(wanted) > len(rows):
+                    self._insert_rows(tab, rows[-1], date, wanted[len(rows) :])
+                elif len(rows) > len(wanted):
+                    self._delete_rows(tab, rows[len(wanted) :])
             self._invalidate(tab)
-            log.info("saved entry for %s in tab %s (row %s)", entry.date, tab, entry.row)
-            return entry
+            log.info("saved %d item(s) for %s in tab %s", len(values), date, tab)
+            return self.get_day(date)
+
+    def save_entry(self, entry: DayEntry) -> DayEntry:
+        """Set the day to exactly this one entry (kept for single-project callers)."""
+        day = self.save_day(entry.date, [entry] if entry.has_content or any(entry.values()) else [])
+        entry.row = day.row
+        return entry
 
     def clear_entry(self, date: dt.date) -> None:
-        self.save_entry(DayEntry(date))
+        self.save_day(date, [])
 
     def fill_month(
         self,
         year: int,
         month: int,
-        prefill: dict[dt.date, list[str]],
+        prefill: dict[dt.date, list],
         overwrite: bool = False,
     ) -> int:
-        """Bulk-load values into a month (used by the import script).
+        """Bulk-load days into a month (imports and templates).
 
-        Only empty days are filled unless ``overwrite`` is set. Returns the
-        number of rows written.
+        Each value is one row (``list[str]``) or several (``list[list[str]]``).
+        Only empty days are filled unless ``overwrite`` is set. Returns the number
+        of days written.
         """
+        wanted = {d: normalize_items(v) for d, v in prefill.items()}
+        wanted = {d: v for d, v in wanted.items() if v}
+        if not wanted:
+            return 0
         with self._lock:
             tab = self.find_tab(year, month)
             if not tab:
-                self._create_tab(year, month, prefill)
+                self._create_tab(year, month, {d: v[0] for d, v in wanted.items()})
                 self.refresh()
-                return len(prefill)
+                for d, v in wanted.items():
+                    if len(v) > 1:
+                        self.save_day(d, v)
+                return len(wanted)
             self._invalidate(tab)
-            appended = 0
+            written = 0
             updates: dict[int, list[str]] = {}
-            for entry in self.get_month(year, month):
-                values = prefill.get(entry.date)
-                if not values or not any(values):
+            complex_days: dict[dt.date, list[list[str]]] = {}
+            for day in self.get_month(year, month):
+                values = wanted.get(day.date)
+                if not values or (day.has_content and not overwrite):
                     continue
-                if entry.has_content and not overwrite:
-                    continue
-                if entry.row:
-                    updates[entry.row] = values
+                rows = [i.row for i in day.items if i.row]
+                if len(values) == 1 and len(rows) == 1:
+                    updates[rows[0]] = values[0]  # fast path: batched single-row writes
                 else:
-                    self._append_row(tab, entry.date, values)
-                    appended += 1
+                    complex_days[day.date] = values
+                written += 1
             if updates:
                 self._write_rows(tab, updates)
             self._invalidate(tab)
-            return len(updates) + appended
+            for d, v in complex_days.items():
+                self.save_day(d, v)
+            return written
 
     def available_months(self, start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
         """Months between start and end, plus any month that already has a tab."""

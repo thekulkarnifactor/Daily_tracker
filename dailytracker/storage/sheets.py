@@ -113,6 +113,46 @@ class SheetsStorage(Storage):
         return row_no
 
     @_wrap_errors
+    def _insert_rows(self, tab: str, after_row: int, date: dt.date, values: list[list[str]]) -> None:
+        ws = self._ws(tab)
+        count = len(values)
+        self.spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "dimension": "ROWS",
+                                "startIndex": after_row,  # 0-based: directly below after_row
+                                "endIndex": after_row + count,
+                            },
+                            "inheritFromBefore": True,  # copy the day's colours and date format
+                        }
+                    }
+                ]
+            }
+        )
+        ws.update(
+            values=[[date_to_serial(date), *v] for v in values],
+            range_name=f"A{after_row + 1}:F{after_row + count}",
+            value_input_option=ValueInputOption.raw,
+        )
+
+    @_wrap_errors
+    def _delete_rows(self, tab: str, rows: list[int]) -> None:
+        ws = self._ws(tab)
+        requests = [
+            {
+                "deleteDimension": {
+                    "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": r - 1, "endIndex": r}
+                }
+            }
+            for r in sorted(rows, reverse=True)  # bottom-up keeps the other indexes valid
+        ]
+        self.spreadsheet.batch_update({"requests": requests})
+
+    @_wrap_errors
     def _create_tab(self, year: int, month: int, prefill) -> str:
         prefill = prefill or {}
         look = self.month_style()

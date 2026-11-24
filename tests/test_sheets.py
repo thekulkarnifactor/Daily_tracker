@@ -47,6 +47,16 @@ class FakeWorksheet:
         assert value_input_option.value == "RAW"
         self._put(range_name.split(":")[0], values)
 
+    def _shift(self, from_row, by):
+        """Move every cell at/after from_row by `by` rows (insert >0, delete <0)."""
+        moved = {}
+        for (r, c), v in self.cells.items():
+            if by < 0 and from_row + by <= r < from_row:
+                continue  # deleted rows
+            moved[(r + by, c) if r >= from_row else (r, c)] = v
+        self.cells = moved
+        self.row_count += by
+
     def get_all_values(self):
         if not self.cells:
             return []
@@ -88,6 +98,18 @@ class FakeSpreadsheet:
 
     def batch_update(self, body):
         self.requests.extend(body["requests"])
+        for r in body["requests"]:
+            if "insertDimension" in r:
+                rng = r["insertDimension"]["range"]
+                self._sheet(rng["sheetId"])._shift(rng["startIndex"] + 1, rng["endIndex"] - rng["startIndex"])
+            elif "deleteDimension" in r:
+                rng = r["deleteDimension"]["range"]
+                self._sheet(rng["sheetId"])._shift(
+                    rng["endIndex"] + 1, -(rng["endIndex"] - rng["startIndex"])
+                )
+
+    def _sheet(self, sid):
+        return next(s for s in self.sheets if s.id == sid)
 
 
 @pytest.fixture
@@ -171,3 +193,24 @@ def test_templates_and_month_style_roundtrip(sheets):
     # no spacer rows: day N is on row N+1
     assert ws.cells[(32, 1)] == date_to_serial(dt.date(2026, 12, 31))
     assert not any("mergeCells" in r for r in sheets.spreadsheet.requests)
+
+
+def test_multiple_projects_per_day_insert_and_delete_rows(sheets):
+    d = dt.date(2026, 11, 17)
+    sheets.save_entry(DayEntry(d, project="Next day guard"))  # creates the tab
+    nxt = dt.date(2026, 11, 18)
+    sheets.save_entry(DayEntry(nxt, project="Wed"))
+    sheets.save_day(
+        d, [DayEntry(d, project="BnB"), DayEntry(d, project="Workday"), DayEntry(d, project="EZ")]
+    )
+    day = sheets.get_day(d)
+    assert [i.project for i in day.items] == ["BnB", "Workday", "EZ"]
+    rows = [i.row for i in day.items]
+    assert rows == [rows[0], rows[0] + 1, rows[0] + 2]
+    assert sheets.get_entry(nxt).project == "Wed"  # following day shifted, not overwritten
+    inserts = [r for r in sheets.spreadsheet.requests if "insertDimension" in r]
+    assert inserts and inserts[-1]["insertDimension"]["inheritFromBefore"] is True
+
+    sheets.save_day(d, [DayEntry(d, project="Only one")])
+    assert [i.project for i in sheets.get_day(d).items] == ["Only one"]
+    assert sheets.get_entry(nxt).project == "Wed"

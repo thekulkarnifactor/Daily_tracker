@@ -10,6 +10,7 @@ database: every save in the app is written straight into the month tab (`Nov-26`
 ## Features
 
 - **Month calendar.** Weekdays, weekends and today, with colour states for Done, In progress, Leave/holiday and Not logged.
+- **Several projects per day.** In the day dialog, click **+ Add another project** to log each project with its own category, details, assigned by and status. In the sheet, every project is its own row under the same date, directly below the day's main row, with the day's colours copied. Each calendar cell lists the projects with a status dot, and a strip above the calendar shows how many days you spent on each project that month.
 - **One-click log entry.** Project (with autocomplete), task category, details, assigned by and status. Ctrl/Cmd+Enter saves.
 - **Google Sheets storage.** Keeps your existing layout: same columns, weekday colours, merged weekend blocks and `MMM-YY` tab names. Missing month tabs are created, styled, when you first log a day in them.
 - **Reads legacy tabs** such as `Sept-23` and `June-25`, both MM/DD and DD/MM date text, and rows where the date cell was left blank.
@@ -116,7 +117,8 @@ All settings are environment variables; see [`.env.example`](.env.example). With
 | `GET /?month=2026-11` | Calendar (legacy `?sheet=Nov-26` also works) |
 | `POST /entry`, `POST /entry/clear` | Save or clear a day (CSRF-protected) |
 | `POST /sync` | Drop the cache and re-read the sheet |
-| `GET /api/month/2026-11` | JSON for a month |
+| `GET /api/month/2026-11` | JSON for a month (each day lists its project entries) |
+| `GET /?day=2026-11-24&project=A&details=…&project=B&details=…` | Quick-add link: opens the day pre-filled (repeat the fields once per project); nothing is saved until **Save** |
 | `GET /templates`, `POST /templates/save`, `/templates/delete`, `/templates/apply` | Entry templates and bulk apply |
 | `GET /import`, `POST /import/preview`, `GET /import/review/<token>`, `POST /import/run` | Import history from an .xlsx upload |
 | `GET /import/progress/<job>`, `GET /import/status/<job>` | Live import progress (page and JSON) |

@@ -75,3 +75,7 @@ button.day:hover{transform:none;border-color:var(--blue);}
 .progress-pct{font-family:'Fraunces',Georgia,serif;font-weight:600;color:var(--blue);}
 .progress-stats .val{font-family:'Fraunces',Georgia,serif;font-weight:600;}
 .progress{background:#0B1813;}
+.item-block{background:#11231C;border-color:var(--line);}
+.item-title{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:1rem;color:var(--blue);}
+.proj-chip{background:var(--panel);} .proj-chip b{color:var(--blue);}
+.dialog-foot{background:var(--panel);}

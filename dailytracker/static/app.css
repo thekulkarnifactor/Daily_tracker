@@ -146,6 +146,29 @@ button.day:hover .add, button.day:focus-visible .add, .is-today .add { opacity: 
 .dialog-foot { display: flex; gap: 10px; margin-top: 22px; align-items: center; }
 .spacer { flex: 1; }
 
+/* multiple projects per day */
+.dialog { max-height: calc(100vh - 32px); }
+.dialog-body { max-height: calc(100vh - 34px); overflow-y: auto; }
+.dialog-foot { position: sticky; bottom: -22px; background: var(--panel); padding: 14px 0 6px; margin-bottom: -6px; }
+.items { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.item-block { border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px 14px; margin: 0; min-width: 0; }
+.item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 0; margin-bottom: -4px; float: left; }
+.item-head + * { clear: both; }
+.item-title { font-weight: 700; font-size: .9rem; }
+.item-tools { display: flex; gap: 6px; align-items: center; padding-top: 10px; }
+.select-sm { padding: 5px 8px; font-size: .82rem; max-width: 190px; }
+.add-item { width: 100%; margin-top: 12px; border-style: dashed; }
+.day-items { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.day-items li { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day-items .proj { flex-shrink: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.task-inline { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.item-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); align-self: center; }
+.dot-done { background: var(--green); } .dot-progress { background: var(--amber); } .dot-leave { background: var(--red); } .dot-logged { background: var(--blue); }
+.more { color: var(--muted); font-size: .75rem; margin-top: 3px; }
+.project-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+.proj-chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem; color: var(--muted); }
+.proj-chip b { color: var(--text); font-weight: 700; margin-right: 4px; }
+
 /* ---------- toasts */
 .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: flex; flex-direction: column; gap: 8px; }
 .toast { padding: 11px 16px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 10px 25px rgba(0,0,0,.4); transition: opacity .4s; }

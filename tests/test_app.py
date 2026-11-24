@@ -55,7 +55,7 @@ def test_api_and_export(client, storage, weekday):
     client.post("/entry", data={"date": weekday.isoformat(), "project": "P", "status": "Done"})
     data = client.get("/api/month/2026-11").get_json()
     assert data["summary"]["done"] == 1
-    assert len(data["entries"]) == 30
+    assert len(data["days"]) == 30 and data["days"][16]["items"][0]["project"] == "P"
     csv = client.get("/export/2026-11.csv")
     assert csv.mimetype == "text/csv" and b"2026-11-17,P" in csv.data
 
@@ -176,3 +176,33 @@ def test_quick_add_link_prefills_but_does_not_save(client, storage):
     assert not storage.get_entry(dt.date(2026, 11, 24)).has_content
     assert b"prefill-data" not in client.get("/?day=2026-11-28&project=x").data  # weekend ignored
     assert b"prefill-data" not in client.get("/?day=nope").data
+
+
+def test_save_multiple_projects_from_dialog(client, storage, weekday):
+    data = {
+        "date": weekday.isoformat(),
+        "project": ["BnB", "Workday"],
+        "category": ["Core Dev - Coding", "Core Dev - Research"],
+        "details": ["1. schema config", "1. HOT PROD"],
+        "assignee": ["Chintan", ""],
+        "status": ["Done", "In Progress"],
+    }
+    client.post("/entry", data=data)
+    day = storage.get_day(weekday)
+    assert [(i.project, i.task, i.status) for i in day.items] == [
+        ("BnB", "Core Dev - Coding", "Done"),
+        ("Workday", "Core Dev - Research", "In Progress"),
+    ]
+    page = client.get("/?month=2026-11").data
+    assert b"is-multi" in page and b"Workday" in page and b"proj-chip" in page
+
+    csv = client.get("/export/2026-11.csv").data.decode()
+    assert "2026-11-17,BnB" in csv and "2026-11-17,Workday" in csv
+
+    client.post("/entry", data={**data, "project": ["BnB", ""]})  # second block missing project
+    assert len(storage.get_day(weekday).items) == 2  # rejected, unchanged
+
+
+def test_quick_add_link_with_two_projects(client):
+    resp = client.get("/?day=2026-11-24&project=BnB&details=a&project=Workday&details=b")
+    assert b'"project": "Workday"' in resp.data and b'"details": "b"' in resp.data

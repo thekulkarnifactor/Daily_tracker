@@ -26,6 +26,7 @@ from .storage import Storage, StorageError
 log = logging.getLogger(__name__)
 bp = Blueprint("main", __name__)
 
+MAX_ITEMS_PER_DAY = 10
 MAX_LEN = {"project": 120, "category": 120, "details": 5000, "assignee": 120, "status": 40}
 
 
@@ -68,16 +69,24 @@ def dashboard():
     if prefill:
         ym = (prefill["day"].year, prefill["day"].month)
     year, month = ym
-    entries = storage().get_month(year, month)
+    days = storage().get_month(year, month)
     tab = storage().find_tab(year, month)
 
-    known_tasks = sorted({e.task for e in entries if e.task and e.task not in TASK_CATEGORIES})
+    items = [i for d in days for i in d.work]
+    known_tasks = sorted({i.task for i in items if i.task and i.task not in TASK_CATEGORIES})
+    project_days: dict[str, int] = {}
+    for d in days:
+        if not d.is_leave:
+            for p in d.projects:
+                project_days[p] = project_days.get(p, 0) + 1
     prev_ym, next_ym = shift_month(year, month, -1), shift_month(year, month, 1)
 
     return render_template(
         "index.html",
         user=current_user(),
-        entries=entries,
+        days=days,
+        project_days=sorted(project_days.items(), key=lambda kv: (-kv[1], kv[0].lower())),
+        known_projects=sorted({i.project for i in items if i.project}, key=str.lower),
         pad_days=dt.date(year, month, 1).weekday(),
         month_label=dt.date(year, month, 1).strftime("%B %Y"),
         month_param=_month_param(year, month),
@@ -85,21 +94,22 @@ def dashboard():
         next_month=_month_param(*next_ym),
         timeline=[(_month_param(y, m), dt.date(y, m, 1).strftime("%b %Y")) for y, m in reversed(_timeline())],
         tab=tab,
-        summary=summarize(entries, t),
+        summary=summarize(days, t),
         categories=TASK_CATEGORIES + known_tasks,
         statuses=STATUSES,
         today=t,
         backend=storage().name,
         templates=[t.to_dict() for t in storage().list_templates()],
-        prefill={**prefill, "day": prefill["day"].isoformat()} if prefill else None,
+        prefill={"day": prefill["day"].isoformat(), "items": prefill["items"]} if prefill else None,
     )
 
 
 def _quick_add_prefill() -> dict | None:
-    """Quick-add link: ``/?day=2026-11-24&project=…&category=…&details=…&assignee=…&status=…``
+    """Quick-add link: ``/?day=2026-11-24&project=A&details=…&project=B&details=…``
 
-    Opens that day's dialog with the fields filled in. Nothing is saved until
-    the user presses Save, so the link is safe to share or bookmark.
+    Opens that day's dialog with the fields filled in. Repeat the field group
+    (project, category, details, assignee, status) once per project. Nothing is
+    saved until the user presses Save, so the link is safe to share or bookmark.
     """
     raw = request.args.get("day")
     if not raw:
@@ -110,8 +120,23 @@ def _quick_add_prefill() -> dict | None:
         return None
     if day.weekday() >= 5:
         return None
-    fields = {k: (request.args.get(k) or "").strip()[:limit] for k, limit in MAX_LEN.items()}
-    return {"day": day, **{k: v for k, v in fields.items() if v}}
+    items = [i for i in _items_from(request.args) if any(i.values())]
+    return {"day": day, "items": items}
+
+
+def _items_from(source) -> list[dict]:
+    """Zip repeated form/query fields into one dict per project block."""
+    columns = {k: source.getlist(k) for k in MAX_LEN}
+    count = max((len(v) for v in columns.values()), default=0)
+    items = []
+    for n in range(min(count, MAX_ITEMS_PER_DAY)):
+        items.append(
+            {
+                k: (columns[k][n] if n < len(columns[k]) else "").strip()[:limit]
+                for k, limit in MAX_LEN.items()
+            }
+        )
+    return items
 
 
 def _form_date() -> dt.date:
@@ -131,20 +156,24 @@ def save_entry():
     d = _form_date()
     if d.weekday() >= 5:
         abort(400, "Weekend days are not editable")
-    fields = {k: (request.form.get(k) or "").strip()[:limit] for k, limit in MAX_LEN.items()}
-    if not fields["project"]:
-        flash("Project is required.", "error")
+    blocks = [b for b in _items_from(request.form) if any(b.values())]
+    if any(not b["project"] for b in blocks):
+        flash("Each entry needs a project name.", "error")
         return _back(d)
-    entry = DayEntry(
-        date=d,
-        project=fields["project"],
-        task=fields["category"],
-        details=fields["details"],
-        assignee=fields["assignee"],
-        status=fields["status"],
-    )
-    storage().save_entry(entry)
-    flash(f"Saved {d.strftime('%a %d %b')}.", "success")
+    entries = [
+        DayEntry(
+            date=d,
+            project=b["project"],
+            task=b["category"],
+            details=b["details"],
+            assignee=b["assignee"],
+            status=b["status"],
+        )
+        for b in blocks
+    ]
+    storage().save_day(d, entries)
+    what = f"{len(entries)} projects" if len(entries) > 1 else ("the entry" if entries else "an empty day")
+    flash(f"Saved {what} for {d.strftime('%a %d %b')}.", "success")
     return _back(d)
 
 
@@ -171,12 +200,12 @@ def sync():
 @login_required
 def api_month(month: str):
     ym = _parse_month(month) or abort(404)
-    entries = storage().get_month(*ym)
-    s = summarize(entries, today())
+    days = storage().get_month(*ym)
+    s = summarize(days, today())
     return jsonify(
         month=_month_param(*ym),
         summary={**s.__dict__, "pending": s.pending},
-        entries=[{**e.to_dict(), "state": e.state} for e in entries],
+        days=[d.to_dict() for d in days],
     )
 
 
@@ -187,8 +216,9 @@ def export_csv(month: str):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(HEADERS)
-    for e in storage().get_month(*ym):
-        writer.writerow([e.date.isoformat(), *e.values()])
+    for day in storage().get_month(*ym):
+        for item in day.work or [day.primary]:  # one row per project; empty days kept as blank rows
+            writer.writerow([day.date.isoformat(), *item.values()])
     return Response(
         buf.getvalue(),
         mimetype="text/csv",

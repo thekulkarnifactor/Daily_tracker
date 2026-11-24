@@ -37,42 +37,55 @@
     <div class="metric"><div class="lbl">Not logged yet</div><div class="val {% if summary.pending %}c-amber{% endif %}">{{ summary.pending }}</div></div>
   </section>
 
+  {% if project_days %}
+  <section class="project-strip" aria-label="Projects this month">
+    {% for name, count in project_days %}
+      <span class="proj-chip"><b>{{ name }}</b> {{ count }} day{{ 's' if count != 1 }}</span>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <section class="calendar" aria-label="{{ month_label }}">
     {% for wd in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
       <div class="wd">{{ wd }}</div>
     {% endfor %}
     {% for _ in range(pad_days) %}<div class="pad" aria-hidden="true"></div>{% endfor %}
 
-    {% for e in entries %}
-      {% set editable = not e.is_weekend %}
+    {% for d in days %}
+      {% set editable = not d.is_weekend %}
+      {% set work = d.work %}
       <{{ 'button' if editable else 'div' }}
-        id="d{{ e.date.isoformat() }}"
-        class="day state-{{ e.state }}{% if e.date == today %} is-today{% endif %}{% if e.date > today %} is-future{% endif %}"
+        id="d{{ d.date.isoformat() }}"
+        class="day state-{{ d.state }}{% if d.date == today %} is-today{% endif %}{% if d.date > today %} is-future{% endif %}{% if work | length > 1 %} is-multi{% endif %}"
         {% if editable %}
           type="button"
-          data-date="{{ e.date.isoformat() }}"
-          data-label="{{ e.date.strftime('%A, %d %B %Y') }}"
-          data-project="{{ e.project }}"
-          data-task="{{ e.task }}"
-          data-details="{{ e.details }}"
-          data-assignee="{{ e.assignee }}"
-          data-status="{{ e.status }}"
-          aria-label="{{ e.date.strftime('%A %d %B') }}{% if e.project %}: {{ e.project }}{% endif %}"
+          data-date="{{ d.date.isoformat() }}"
+          data-label="{{ d.date.strftime('%A, %d %B %Y') }}"
+          data-items='{{ d.item_dicts() | tojson }}'
+          aria-label="{{ d.date.strftime('%A %d %B') }}{% if d.projects %}: {{ d.projects | join(', ') }}{% endif %}"
         {% endif %}>
         <div class="day-head">
-          <span class="day-num">{{ e.date.day }}</span>
-          <span class="day-wd">{{ e.date.strftime('%a') }}</span>
-          {% if e.state == 'done' %}<span class="pill pill-green">Done</span>
-          {% elif e.state == 'progress' %}<span class="pill pill-amber">In progress</span>
-          {% elif e.state == 'leave' %}<span class="pill pill-red">Leave</span>{% endif %}
+          <span class="day-num">{{ d.date.day }}</span>
+          <span class="day-wd">{{ d.date.strftime('%a') }}</span>
+          {% if d.state == 'done' %}<span class="pill pill-green">Done</span>
+          {% elif d.state == 'progress' %}<span class="pill pill-amber">In progress</span>
+          {% elif d.state == 'leave' %}<span class="pill pill-red">Leave</span>{% endif %}
         </div>
         <div class="day-body">
-          {% if e.state == 'weekend' %}
+          {% if d.state == 'weekend' %}
             <span class="muted">Weekend</span>
-          {% elif e.has_content %}
+          {% elif work | length == 1 %}
+            {% set e = work[0] %}
             {% if e.project %}<div class="proj">{{ e.project }}</div>{% endif %}
             {% if e.task %}<div class="task">{{ e.task }}</div>{% endif %}
             {% if e.details %}<div class="details">{{ e.details }}</div>{% endif %}
+          {% elif work %}
+            <ul class="day-items">
+              {% for e in work[:3] %}
+                <li><span class="item-dot dot-{{ e.state }}" aria-hidden="true"></span><span class="proj">{{ e.project or '—' }}</span>{% if e.task %} <span class="task-inline">{{ e.task }}</span>{% endif %}</li>
+              {% endfor %}
+            </ul>
+            {% if work | length > 3 %}<div class="more">+{{ work | length - 3 }} more</div>{% endif %}
           {% elif editable %}
             <span class="add">+ Add entry</span>
           {% endif %}
@@ -81,7 +94,7 @@
     {% endfor %}
   </section>
 
-  <p class="footnote">Edits are written straight to the sheet. Changed something in the sheet directly? Press <b>Sync</b>.</p>
+  <p class="footnote">Edits are written straight to the sheet; each project is its own row under the date. Changed something in the sheet directly? Press <b>Sync</b>.</p>
 </main>
 
 <dialog id="entry-dialog" class="dialog">
@@ -93,47 +106,11 @@
       <button type="button" class="btn btn-icon js-close" aria-label="Close">×</button>
     </header>
 
-    <div class="tpl-row">
-      <label for="f-template">Start from a template</label>
-      <select id="f-template" class="select">
-        <option value="">{% if templates %}— Choose a template —{% else %}No templates yet{% endif %}</option>
-        {% for t in templates %}<option value="{{ loop.index0 }}">{{ t.name }}</option>{% endfor %}
-      </select>
-    </div>
-
-    <label for="f-project">Project</label>
-    <input id="f-project" name="project" maxlength="120" required autocomplete="off" list="project-list">
-    <datalist id="project-list">
-      {% for p in entries | map(attribute='project') | reject('in', ['', 'Saturday', 'Sunday']) | unique %}
-        <option value="{{ p }}">
-      {% endfor %}
-    </datalist>
-
-    <label for="f-category">Task category</label>
-    <select id="f-category" name="category" class="select">
-      {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-
-    <label for="f-details">Task details</label>
-    <textarea id="f-details" name="details" maxlength="5000" rows="6" placeholder="1. Work completed…"></textarea>
-
-    <div class="row-2">
-      <div>
-        <label for="f-assignee">Assigned by</label>
-        <input id="f-assignee" name="assignee" maxlength="120" autocomplete="off">
-      </div>
-      <div>
-        <label for="f-status">Status</label>
-        <select id="f-status" name="status" class="select">
-          {% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-          <option value="">—</option>
-        </select>
-      </div>
-    </div>
+    <div id="items" class="items"></div>
+    <button type="button" class="btn btn-ghost add-item" id="add-item">+ Add another project</button>
 
     <footer class="dialog-foot">
       <button type="submit" form="clear-form" class="btn btn-danger" id="f-clear">Clear day</button>
-      <button type="button" class="btn btn-ghost" id="f-save-template" title="Save these fields as a reusable template">☆ Save as template</button>
       <span class="spacer"></span>
       <button type="button" class="btn btn-ghost js-close">Cancel</button>
       <button type="submit" class="btn btn-primary">Save</button>
@@ -151,6 +128,46 @@
     {% endfor %}
   </form>
 </dialog>
+
+<template id="item-tpl">
+  <fieldset class="item-block">
+    <legend class="item-head">
+      <span class="item-title">Project</span>
+      <span class="item-tools">
+        <select class="select select-sm js-tpl" aria-label="Fill from a template">
+          <option value="">{% if templates %}Fill from template…{% else %}No templates yet{% endif %}</option>
+          {% for t in templates %}<option value="{{ loop.index0 }}">{{ t.name }}</option>{% endfor %}
+        </select>
+        <button type="button" class="btn btn-ghost btn-sm js-save-tpl" title="Save this project's fields as a template">☆</button>
+        <button type="button" class="btn btn-ghost btn-sm js-remove" title="Remove this project" aria-label="Remove this project">×</button>
+      </span>
+    </legend>
+    <label>Project</label>
+    <input name="project" maxlength="120" required autocomplete="off" list="project-list" class="js-project">
+    <label>Task category</label>
+    <select name="category" class="select select-full js-category">
+      {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <label>Task details</label>
+    <textarea name="details" maxlength="5000" rows="4" placeholder="1. Work completed…" class="js-details"></textarea>
+    <div class="row-2">
+      <div>
+        <label>Assigned by</label>
+        <input name="assignee" maxlength="120" autocomplete="off" class="js-assignee">
+      </div>
+      <div>
+        <label>Status</label>
+        <select name="status" class="select select-full js-status">
+          {% for st in statuses %}<option value="{{ st }}">{{ st }}</option>{% endfor %}
+          <option value="">—</option>
+        </select>
+      </div>
+    </div>
+  </fieldset>
+</template>
+<datalist id="project-list">
+  {% for p in known_projects %}<option value="{{ p }}">{% endfor %}
+</datalist>
 <script type="application/json" id="templates-data">{{ templates | tojson }}</script>
 {% if prefill %}<script type="application/json" id="prefill-data">{{ prefill | tojson }}</script>{% endif %}
 {% endblock %}

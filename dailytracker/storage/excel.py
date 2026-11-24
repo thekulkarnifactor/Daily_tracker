@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import tempfile
+from copy import copy
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -156,6 +157,41 @@ class ExcelStorage(Storage):
             set_text(ws.cell(row=row_no, column=offset), value)
         self._save(wb)
         return row_no
+
+    def _insert_rows(self, tab: str, after_row: int, date: dt.date, values: list[list[str]]) -> None:
+        wb = self._load()
+        ws = wb[tab]
+        count = len(values)
+        ws.insert_rows(after_row + 1, amount=count)
+        # openpyxl moves cells but not merged ranges or row heights; shift them ourselves.
+        for rng in ws.merged_cells.ranges:
+            if rng.min_row > after_row:
+                rng.shift(0, count)
+        heights = {r: ws.row_dimensions[r].height for r in range(after_row + 1, ws.max_row + 1)}
+        for r in sorted(heights, reverse=True):
+            ws.row_dimensions[r + count].height = heights[r]
+        for offset, row_values in enumerate(values, start=1):
+            r = after_row + offset
+            ws.row_dimensions[r].height = ws.row_dimensions[after_row].height
+            for col in range(1, 7):
+                ws.cell(row=r, column=col)._style = copy(ws.cell(row=after_row, column=col)._style)
+            ws.cell(row=r, column=1, value=date).number_format = "mm/dd/yyyy"
+            for col, value in enumerate(row_values, start=2):
+                set_text(ws.cell(row=r, column=col), value)
+        self._save(wb)
+
+    def _delete_rows(self, tab: str, rows: list[int]) -> None:
+        wb = self._load()
+        ws = wb[tab]
+        for r in sorted(rows, reverse=True):
+            for rng in list(ws.merged_cells.ranges):
+                if rng.min_row <= r <= rng.max_row:
+                    ws.unmerge_cells(str(rng))
+            ws.delete_rows(r)
+            for rng in ws.merged_cells.ranges:
+                if rng.min_row > r:
+                    rng.shift(0, -1)
+        self._save(wb)
 
     def _create_tab(self, year: int, month: int, prefill) -> str:
         wb = self._load(create=True)

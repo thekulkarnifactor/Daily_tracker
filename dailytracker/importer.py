@@ -19,12 +19,12 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .model import DayEntry, parse_tab_name
+from .model import parse_tab_name
 from .storage import Storage, StorageError
 from .storage.excel import ExcelStorage
 
 Month = tuple[int, int]
-MonthDays = dict[Month, dict[dt.date, list[str]]]
+MonthDays = dict[Month, dict[dt.date, list[list[str]]]]  # date -> one row of B..F per project
 
 log = logging.getLogger(__name__)
 
@@ -52,14 +52,18 @@ def read_workbook(path: str) -> tuple[MonthDays, list[str]]:
         if not ym:
             skipped.append(name)
             continue
-        for entry in source.get_month(*ym):
-            if entry.has_content:
-                months[ym][entry.date] = entry.values()
+        for day in source.get_month(*ym):
+            if day.has_content:
+                months[ym][day.date] = [i.values() for i in day.work]
     return dict(months), skipped
 
 
-def _norm(values: list[str]) -> tuple[str, ...]:
-    return tuple(" ".join(str(v or "").split()).lower() for v in values)
+def _norm(items: list[list[str]]) -> tuple[tuple[str, ...], ...]:
+    return tuple(tuple(" ".join(str(v or "").split()).lower() for v in row) for row in items)
+
+
+def _describe(items: list[list[str]]) -> str:
+    return " | ".join(" / ".join(v for v in row[:3] if v) for row in items)[:160]
 
 
 @dataclass
@@ -90,21 +94,21 @@ def analyze(source: MonthDays, target: Storage) -> list[MonthPlan]:
     for year, month in sorted(source):
         days = source[(year, month)]
         tab = target.find_tab(year, month)
-        existing = {e.date: e for e in target.get_month(year, month)} if tab else {}
+        existing = {d.date: d for d in target.get_month(year, month)} if tab else {}
         plan = MonthPlan(year, month, tab)
         for d in sorted(days):
-            values = days[d]
-            current: DayEntry | None = existing.get(d)
+            items = days[d]
+            current = existing.get(d)
             if not current or not current.has_content:
                 plan.new.append(d.isoformat())
-            elif _norm(current.values()) == _norm(values):
+            elif _norm([i.values() for i in current.work]) == _norm(items):
                 plan.same += 1
             else:
                 plan.conflicts.append(
                     {
                         "date": d.isoformat(),
-                        "file": " / ".join(v for v in values[:3] if v)[:120],
-                        "sheet": " / ".join(v for v in current.values()[:3] if v)[:120],
+                        "file": _describe(items),
+                        "sheet": _describe([i.values() for i in current.work]),
                     }
                 )
         plans.append(plan)

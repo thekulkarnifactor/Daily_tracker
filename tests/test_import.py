@@ -159,3 +159,15 @@ def test_import_requires_month_selection(client, source_file):
     token = _upload(client, source_file).headers["Location"].rsplit("/", 1)[-1]
     resp = client.post("/import/run", data={"token": token})
     assert f"/import/review/{token}" in resp.headers["Location"]
+
+
+def test_import_keeps_multi_project_days(tmp_path, storage):
+    path = str(tmp_path / "multi.xlsx")
+    src = ExcelStorage(path, cache_ttl=0)
+    d = D(2026, 10, 6)
+    src.save_day(d, [DayEntry(d, project="BnB"), DayEntry(d, project="Workday")])
+    months, _ = read_workbook(path)
+    assert months[(2026, 10)][d] == [["BnB", "", "", "", ""], ["Workday", "", "", "", ""]]
+    run_import(months, storage, {(2026, 10)})
+    assert storage.get_day(d).projects == ["BnB", "Workday"]
+    assert analyze(months, storage)[0].same == 1

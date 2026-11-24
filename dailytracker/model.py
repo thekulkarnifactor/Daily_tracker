@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 HEADERS = ["Date", "Project", "Task", "Task Details", "AssigneBy", "Status"]
 
@@ -231,6 +231,100 @@ def placeholder_values(d: dt.date, weekend_label: str = "Weekend") -> list[str]:
 
 
 @dataclass
+class Day:
+    """One calendar day: one or more work entries (one per project), stored as rows with the same date.
+
+    ``items[0]`` is the day's main row in the sheet (it always exists in the month
+    layout); extra projects are extra rows directly below it.
+    """
+
+    date: dt.date
+    items: list[DayEntry] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.items:
+            self.items = [DayEntry(self.date)]
+
+    @property
+    def primary(self) -> DayEntry:
+        return self.items[0]
+
+    @property
+    def row(self) -> int | None:
+        return self.primary.row
+
+    @property
+    def work(self) -> list[DayEntry]:
+        """Entries that hold real content (weekend placeholders excluded)."""
+        return [i for i in self.items if i.has_content]
+
+    @property
+    def is_weekend(self) -> bool:
+        return self.date.weekday() >= 5
+
+    @property
+    def has_content(self) -> bool:
+        return bool(self.work)
+
+    @property
+    def is_leave(self) -> bool:
+        work = self.work
+        return bool(work) and all(i.is_leave for i in work)
+
+    @property
+    def projects(self) -> list[str]:
+        seen: list[str] = []
+        for i in self.work:
+            if i.project and i.project not in seen:
+                seen.append(i.project)
+        return seen
+
+    @property
+    def state(self) -> str:
+        if self.is_weekend and not any(i.has_work for i in self.items):
+            return "weekend"
+        work = self.work
+        if not work:
+            return "empty"
+        if self.is_leave:
+            return "leave"
+        statuses = [i.status.lower() for i in work if not i.is_leave]
+        if "in progress" in statuses:
+            return "progress"
+        if statuses and all(s == "done" for s in statuses):
+            return "done"
+        return "logged"
+
+    def item_dicts(self) -> list[dict]:
+        return [
+            {
+                "project": i.project,
+                "category": i.task,
+                "details": i.details,
+                "assignee": i.assignee,
+                "status": i.status,
+            }
+            for i in self.work
+        ]
+
+    def to_dict(self) -> dict:
+        return {
+            "date": self.date.isoformat(),
+            "state": self.state,
+            "items": [{**i.to_dict(), "state": i.state} for i in self.work],
+        }
+
+
+def normalize_items(values) -> list[list[str]]:
+    """Accept one row (list[str]) or several (list[list[str]]); drop empty rows."""
+    if not values:
+        return []
+    rows = values if isinstance(values[0], (list, tuple)) else [values]
+    cleaned = [[str(v or "").strip() for v in (list(r) + [""] * 5)[:5]] for r in rows]
+    return [r for r in cleaned if any(r)]
+
+
+@dataclass
 class MonthSummary:
     workdays: int
     logged: int
@@ -243,7 +337,7 @@ class MonthSummary:
         return max(self.workdays - self.logged - self.leave, 0)
 
 
-def summarize(entries: list[DayEntry], today: dt.date | None = None) -> MonthSummary:
+def summarize(entries: list[Day] | list[DayEntry], today: dt.date | None = None) -> MonthSummary:
     today = today or dt.date.today()
     workdays = [e for e in entries if not e.is_weekend]
     past = [e for e in workdays if e.date <= today]

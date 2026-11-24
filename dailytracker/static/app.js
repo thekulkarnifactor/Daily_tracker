@@ -7,36 +7,95 @@
   function ensureOption(select, value) {
     if (!value) return;
     if (![...select.options].some((o) => o.value === value)) {
-      select.add(new Option(value, value), 0);
+      select.add(new Option(value, value), select.options.length ? 1 : 0);
     }
   }
 
-  function openEntry(cell) {
+  // ---- Day dialog: one block per project
+  const tplData = document.getElementById("templates-data");
+  const templates = tplData ? JSON.parse(tplData.textContent || "[]") : [];
+  const itemsBox = $("items");
+  const itemTpl = document.getElementById("item-tpl");
+  let blockSeq = 0;
+
+  function fillBlock(block, item) {
+    const q = (sel) => block.querySelector(sel);
+    if ("project" in item) q(".js-project").value = item.project || "";
+    if ("details" in item) q(".js-details").value = item.details || "";
+    if ("assignee" in item) q(".js-assignee").value = item.assignee || "";
+    if (item.category) { ensureOption(q(".js-category"), item.category); q(".js-category").value = item.category; }
+    if ("status" in item) { ensureOption(q(".js-status"), item.status); q(".js-status").value = item.status || ""; }
+  }
+
+  function renumber() {
+    const blocks = [...itemsBox.querySelectorAll(".item-block")];
+    blocks.forEach((b, i) => {
+      b.querySelector(".item-title").textContent = blocks.length > 1 ? `Project ${i + 1}` : "Project";
+      b.querySelector(".js-remove").hidden = blocks.length === 1;
+    });
+  }
+
+  function addBlock(item, focus) {
+    const frag = itemTpl.content.cloneNode(true);
+    const block = frag.querySelector(".item-block");
+    const n = ++blockSeq;
+    // Give every field a unique id and tie its label to it.
+    block.querySelectorAll("label").forEach((label) => {
+      const field = label.nextElementSibling;
+      if (field) { field.id = `b${n}-${field.name}`; label.htmlFor = field.id; }
+    });
+    block.querySelector(".js-category").value = "Core Dev - Coding";
+    block.querySelector(".js-status").value = "In Progress";
+    if (item) fillBlock(block, item);
+
+    block.querySelector(".js-tpl").addEventListener("change", (e) => {
+      const t = templates[Number(e.target.value)];
+      if (t) fillBlock(block, { project: t.project, category: t.task, details: t.details, assignee: t.assignee, status: t.status });
+      e.target.value = "";
+    });
+    block.querySelector(".js-remove").addEventListener("click", () => { block.remove(); renumber(); });
+    block.querySelector(".js-save-tpl").addEventListener("click", () => {
+      const project = block.querySelector(".js-project").value;
+      const cat = block.querySelector(".js-category").value;
+      const name = (prompt("Name this template:", project ? `${project} – ${cat}` : "") || "").trim();
+      if (!name) return;
+      $("t-name").value = name;
+      $("t-project").value = project;
+      $("t-category").value = cat;
+      $("t-details").value = block.querySelector(".js-details").value;
+      $("t-assignee").value = block.querySelector(".js-assignee").value;
+      $("t-status").value = block.querySelector(".js-status").value;
+      $("template-form").submit();
+    });
+    itemsBox.appendChild(frag);
+    renumber();
+    if (focus) block.querySelector(".js-project").focus();
+    return block;
+  }
+
+  function openEntry(cell, override) {
     const d = cell.dataset;
     $("f-title").textContent = d.label;
     $("f-date").value = d.date;
     $("c-date").value = d.date;
-    $("f-project").value = d.project || "";
-    $("f-details").value = d.details || "";
-    $("f-assignee").value = d.assignee || "";
-
-    const cat = $("f-category");
-    ensureOption(cat, d.task);
-    cat.value = d.task || "Core Dev - Coding";
-
-    const status = $("f-status");
-    ensureOption(status, d.status);
-    status.value = d.status || "In Progress";
-
-    $("f-clear").hidden = !(d.project || d.task || d.details);
+    let items = [];
+    try { items = JSON.parse(d.items || "[]"); } catch (_) { items = []; }
+    $("f-clear").hidden = items.length === 0;
+    if (override && override.length) items = override;
+    itemsBox.innerHTML = "";
+    (items.length ? items : [null]).forEach((item) => addBlock(item, false));
     dialog.showModal();
-    $("f-project").focus();
+    itemsBox.querySelector(".js-project").focus();
   }
 
   if (dialog) {
     document.querySelectorAll("button.day[data-date]").forEach((cell) =>
       cell.addEventListener("click", () => openEntry(cell))
     );
+    $("add-item").addEventListener("click", () => {
+      const block = addBlock(null, true);
+      block.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
     dialog.querySelectorAll(".js-close").forEach((btn) =>
       btn.addEventListener("click", () => dialog.close())
     );
@@ -44,63 +103,23 @@
       if (e.target === dialog) dialog.close(); // click on backdrop
     });
     $("f-clear").addEventListener("click", (e) => {
-      if (!confirm("Clear everything logged for this day?")) e.preventDefault();
+      if (!confirm("Clear everything logged for this day, for all projects?")) e.preventDefault();
     });
     // Ctrl/Cmd+Enter saves from anywhere in the form.
     $("entry-form").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("entry-form").requestSubmit();
     });
-  }
 
-  // ---- Entry templates in the day dialog
-  const tplData = document.getElementById("templates-data");
-  const templates = tplData ? JSON.parse(tplData.textContent || "[]") : [];
-  const tplSelect = $("f-template");
-  if (tplSelect) {
-    tplSelect.addEventListener("change", () => {
-      const t = templates[Number(tplSelect.value)];
-      if (!t) return;
-      $("f-project").value = t.project || "";
-      $("f-details").value = t.details || "";
-      $("f-assignee").value = t.assignee || "";
-      const cat = $("f-category");
-      ensureOption(cat, t.task);
-      cat.value = t.task || cat.value;
-      const status = $("f-status");
-      ensureOption(status, t.status);
-      status.value = t.status || "";
-    });
-  }
-  const saveTpl = $("f-save-template");
-  if (saveTpl) {
-    saveTpl.addEventListener("click", () => {
-      const suggestion = $("f-project").value ? `${$("f-project").value} – ${$("f-category").value}` : "";
-      const name = (prompt("Name this template:", suggestion) || "").trim();
-      if (!name) return;
-      $("t-name").value = name;
-      $("t-project").value = $("f-project").value;
-      $("t-category").value = $("f-category").value;
-      $("t-details").value = $("f-details").value;
-      $("t-assignee").value = $("f-assignee").value;
-      $("t-status").value = $("f-status").value;
-      $("template-form").submit();
-    });
-  }
-
-  // ---- Quick-add link: open a day with fields pre-filled (still needs Save)
-  const pre = document.getElementById("prefill-data");
-  if (pre && dialog) {
-    const p = JSON.parse(pre.textContent || "{}");
-    const cell = document.querySelector(`button.day[data-date="${p.day}"]`);
-    if (cell) {
-      openEntry(cell);
-      if (p.project) $("f-project").value = p.project;
-      if (p.details) $("f-details").value = p.details;
-      if (p.assignee) $("f-assignee").value = p.assignee;
-      if (p.category) { ensureOption($("f-category"), p.category); $("f-category").value = p.category; }
-      if (p.status) { ensureOption($("f-status"), p.status); $("f-status").value = p.status; }
-      $("f-title").textContent = `${cell.dataset.label} · review and save`;
-      history.replaceState(null, "", `?month=${p.day.slice(0, 7)}`); // so a refresh doesn't re-open it
+    // Quick-add link: open a day with fields pre-filled (still needs Save)
+    const pre = document.getElementById("prefill-data");
+    if (pre) {
+      const p = JSON.parse(pre.textContent || "{}");
+      const cell = document.querySelector(`button.day[data-date="${p.day}"]`);
+      if (cell) {
+        openEntry(cell, p.items);
+        $("f-title").textContent = `${cell.dataset.label} · review and save`;
+        history.replaceState(null, "", `?month=${p.day.slice(0, 7)}`); // so a refresh doesn't re-open it
+      }
     }
   }
 

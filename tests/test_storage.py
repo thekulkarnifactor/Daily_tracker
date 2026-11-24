@@ -97,3 +97,43 @@ def test_blank_date_row_inferred_from_previous_day(storage, excel_path):
     wb.save(excel_path)
     assert storage.get_entry(dt.date(2024, 1, 3)).details == "b"
     assert storage.get_entry(dt.date(2024, 1, 4)).details == "c"
+
+
+def test_multiple_projects_per_day(storage, excel_path):
+    d = dt.date(2026, 11, 20)  # Friday, the weekend merge (21-22) sits just below
+    storage.save_entry(DayEntry(dt.date(2026, 11, 23), project="Monday"))
+    storage.save_day(
+        d,
+        [
+            DayEntry(d, project="BnB", task="Core Dev - Coding", status="Done"),
+            DayEntry(d, project="Workday", status="In Progress"),
+        ],
+    )
+    day = storage.get_day(d)
+    assert [i.project for i in day.items] == ["BnB", "Workday"]
+    assert day.state == "progress" and day.projects == ["BnB", "Workday"]
+    assert storage.get_entry(dt.date(2026, 11, 23)).project == "Monday"
+
+    wb = openpyxl.load_workbook(excel_path)
+    ws = wb["Nov-26"]
+    extra = day.items[1].row
+    assert ws.cell(row=extra, column=1).value.date() == d
+    assert ws.cell(row=extra, column=1).fill.start_color.rgb.endswith("D9E1F2")  # Friday colour copied
+    sat = next(i.row for i in storage.get_day(dt.date(2026, 11, 21)).items)
+    assert any(
+        r.min_row == sat and r.max_row == sat + 1 for r in ws.merged_cells.ranges
+    )  # weekend merge moved
+
+    storage.save_day(d, [DayEntry(d, project="Just one", status="Done")])
+    assert [i.project for i in storage.get_day(d).items] == ["Just one"]
+    storage.clear_entry(d)
+    assert not storage.get_day(d).has_content and len(storage.get_day(d).items) == 1
+    assert storage.get_entry(dt.date(2026, 11, 23)).project == "Monday"
+
+
+def test_fill_month_with_multi_project_days(storage):
+    d = dt.date(2026, 12, 2)
+    storage.fill_month(2026, 12, {d: [["A", "", "", "", "Done"], ["B", "", "", "", "Done"]]})
+    assert storage.get_day(d).projects == ["A", "B"]
+    storage.fill_month(2026, 12, {d: [["C", "", "", "", ""]]}, overwrite=True)
+    assert storage.get_day(d).projects == ["C"]
