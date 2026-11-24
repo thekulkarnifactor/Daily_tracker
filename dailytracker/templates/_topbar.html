@@ -5,6 +5,7 @@
       <a href="{{ url_for('main.dashboard') }}" {% if active == 'calendar' %}aria-current="page"{% endif %}>Calendar</a>
       <a href="{{ url_for('tpl.templates') }}" {% if active == 'templates' %}aria-current="page"{% endif %}>Templates</a>
       <a href="{{ url_for('tpl.month_template') }}" {% if active == 'month' %}aria-current="page"{% endif %}>Month sheet</a>
+      <a href="{{ url_for('imp.start') }}" {% if active == 'import' %}aria-current="page"{% endif %}>Import</a>
     </nav>
   </div>
   <div class="topbar-right">

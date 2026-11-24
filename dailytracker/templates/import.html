@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Import history · Daily Tracker{% endblock %}
+{% block content %}
+{% set active = "import" %}{% include "_topbar.html" %}
+
+<main class="wrapper narrow">
+  <div class="page-head">
+    <h1>Import history</h1>
+    <p class="muted">Bring logged days from an Excel workbook, such as an old <b>Daily.xlsx</b>, into your {% if backend == 'sheets' %}Google Sheet{% else %}workbook{% endif %}.
+      You'll see what changes before anything is written.</p>
+  </div>
+
+  <section class="panel">
+    <form method="post" action="{{ url_for('imp.preview') }}" enctype="multipart/form-data" class="upload-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="dropzone" for="file">
+        <span class="dz-title">Choose an .xlsx file</span>
+        <span class="muted dz-sub">or drop it here · up to {{ max_mb }} MB</span>
+        <span class="dz-file" id="dz-file"></span>
+        <input id="file" name="file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Review import</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>What the file should look like</h2>
+    <ul class="checklist">
+      <li>One tab per month, named like <b>Nov-26</b>, <b>Sept-23</b> or <b>June-25</b>. Other tabs are skipped.</li>
+      <li>Columns in order: Date, Project, Task, Task Details, AssigneBy, Status. The header names don't matter.</li>
+      <li>Weekend placeholder rows and blank spacer rows are ignored.</li>
+      <li>By default only days that are <b>empty</b> in your sheet are filled. You can choose to overwrite on the next screen.</li>
+    </ul>
+  </section>
+</main>
+{% endblock %}

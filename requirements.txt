@@ -6,3 +6,4 @@ gspread==6.2.1
 google-auth==2.62.2
 openpyxl==3.1.5
 gunicorn==27.0.1
+defusedxml==0.7.1

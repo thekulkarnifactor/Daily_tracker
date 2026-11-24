@@ -16,6 +16,8 @@ database: every save in the app is written straight into the month tab (`Nov-26`
 - **Entry templates.** Save entries you log often (e.g. "BnB – development", "Leave"), pick one in the day dialog to fill every field, or save the current day as a template. Templates are stored in a `Templates` tab of your sheet, so you can edit them there too.
 - **Bulk apply.** Apply a template to a date range (up to 120 days). Weekends are skipped, and days you've already logged are kept unless you choose *Overwrite*.
 - **Month sheet template.** Change the headers, colours (header row plus each weekday), column widths, font, weekend label, spacer rows and weekend merging used for **new** month tabs, with a live preview. Settings are stored in a hidden `_config` tab. Existing tabs are never changed, and *Reset to original* restores the default design.
+- **Import history.** Upload an old `.xlsx` workbook (for example `Daily.xlsx` from May–Nov 2026, or the Ellicium history) on the **Import** page. You get a per-month preview first: new days, days that differ from your sheet (shown side by side), identical days, and tabs that will be created. Then pick months and choose whether to keep or replace the differing days. Nothing is written until you confirm.
+- **Field journal theme.** Deep forest green with brass accents, Fraunces serif numerals and Manrope text. Both fonts are self-hosted, so there are no third-party requests.
 - **Metrics.** Workdays so far, logged, done, in progress, leave, and days not logged yet.
 - **CSV export** per month, plus a JSON API at `/api/month/2026-11`.
 - **Google sign-in** limited to the email addresses you allow.
@@ -116,6 +118,7 @@ All settings are environment variables; see [`.env.example`](.env.example). With
 | `POST /sync` | Drop the cache and re-read the sheet |
 | `GET /api/month/2026-11` | JSON for a month |
 | `GET /templates`, `POST /templates/save`, `/templates/delete`, `/templates/apply` | Entry templates and bulk apply |
+| `GET /import`, `POST /import/preview`, `GET /import/review/<token>`, `POST /import/run` | Import history from an .xlsx upload |
 | `GET /month-template`, `POST /month-template`, `/month-template/reset`, `/month-template/create` | Month sheet template |
 | `GET /export/2026-11.csv` | CSV export |
 | `GET /healthz`, `GET /readyz` | Liveness, and readiness (checks Google Sheet access) |

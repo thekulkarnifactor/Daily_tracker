@@ -22,26 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dailytracker.config import Settings  # noqa: E402
-from dailytracker.model import parse_tab_name  # noqa: E402
+from dailytracker.importer import read_workbook  # noqa: E402
 from dailytracker.storage import build_storage  # noqa: E402
-from dailytracker.storage.excel import ExcelStorage  # noqa: E402
-
-
-def read_workbook(path: str) -> dict[tuple[int, int], dict[dt.date, list[str]]]:
-    """All non-empty day entries in a workbook, grouped by month."""
-    if not Path(path).exists():
-        raise SystemExit(f"File not found: {path}")
-    source = ExcelStorage(path, cache_ttl=0)
-    months: dict[tuple[int, int], dict[dt.date, list[str]]] = defaultdict(dict)
-    for name in source.list_tabs():
-        ym = parse_tab_name(name)
-        if not ym:
-            print(f"  skip tab {name!r} (not a month)")
-            continue
-        for entry in source.get_month(*ym):
-            if entry.has_content:
-                months[ym][entry.date] = entry.values()
-    return months
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,7 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     merged: dict[tuple[int, int], dict[dt.date, list[str]]] = defaultdict(dict)
     for path in filter(None, [args.history, args.daily]):  # daily last so it wins
         print(f"Reading {path}")
-        for ym, days in read_workbook(path).items():
+        months, skipped = read_workbook(path)
+        for name in skipped:
+            print(f"  skip tab {name!r} (not a month)")
+        for ym, days in months.items():
             merged[ym].update(days)
 
     settings = Settings()

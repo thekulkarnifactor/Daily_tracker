@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Review import · Daily Tracker{% endblock %}
+{% block content %}
+{% set active = "import" %}{% include "_topbar.html" %}
+
+<main class="wrapper narrow">
+  <div class="page-head">
+    <h1>Review import</h1>
+    <p class="muted">From <b>{{ filename }}</b>: {{ totals.days }} logged days across {{ plans | length }} months. Nothing has been written yet.</p>
+  </div>
+
+  <section class="metrics metrics-4">
+    <div class="metric"><div class="lbl">New days to add</div><div class="val c-green">{{ totals.new }}</div></div>
+    <div class="metric"><div class="lbl">Different from your sheet</div><div class="val {% if totals.conflicts %}c-amber{% endif %}">{{ totals.conflicts }}</div></div>
+    <div class="metric"><div class="lbl">Already identical</div><div class="val">{{ totals.same }}</div></div>
+    <div class="metric"><div class="lbl">Month tabs to create</div><div class="val c-blue">{{ totals.new_tabs }}</div></div>
+  </section>
+
+  <form method="post" action="{{ url_for('imp.run') }}" id="import-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+
+    <section class="panel">
+      <div class="table-head">
+        <h2>Months in the file</h2>
+        <label class="check"><input type="checkbox" id="toggle-all" checked> Select all</label>
+      </div>
+      <table class="import-table">
+        <thead>
+          <tr><th></th><th>Month</th><th>In your sheet</th><th class="num">New</th><th class="num">Different</th><th class="num">Identical</th></tr>
+        </thead>
+        <tbody>
+          {% for p in plans %}
+            {% set useful = p.new or p.conflicts %}
+            <tr class="{% if not useful %}is-done{% endif %}">
+              <td><input type="checkbox" name="months" value="{{ p.key }}" class="month-check" {% if useful %}checked{% endif %} aria-label="Import {{ p.label }}"></td>
+              <td><b>{{ p.label }}</b></td>
+              <td>{% if p.tab %}Tab {{ p.tab }}{% else %}<span class="c-blue">Will create tab</span>{% endif %}</td>
+              <td class="num">{% if p.new %}<b class="c-green">{{ p.new | length }}</b>{% else %}–{% endif %}</td>
+              <td class="num">
+                {% if p.conflicts %}
+                  <details class="conflicts">
+                    <summary class="c-amber"><b>{{ p.conflicts | length }}</b></summary>
+                    <div class="conflict-list">
+                      {% for c in p.conflicts %}
+                        <div class="conflict">
+                          <div class="c-date">{{ c.date }}</div>
+                          <div><span class="muted">File:</span> {{ c.file or '—' }}</div>
+                          <div><span class="muted">Sheet:</span> {{ c.sheet or '—' }}</div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </details>
+                {% else %}–{% endif %}
+              </td>
+              <td class="num muted">{{ p.same or '–' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Days that already have something different in your sheet</h2>
+      <fieldset class="radio-group">
+        <legend class="sr-only">Conflict handling</legend>
+        <label class="radio"><input type="radio" name="mode" value="empty" checked> Keep what's in my sheet, only fill empty days</label>
+        <label class="radio"><input type="radio" name="mode" value="overwrite"> Replace them with the file's version</label>
+      </fieldset>
+      <div class="form-actions">
+        <button class="btn btn-ghost" type="submit" form="cancel-form">Cancel</button>
+        <button class="btn btn-primary" type="submit">Import selected months</button>
+      </div>
+    </section>
+  </form>
+  <form method="post" action="{{ url_for('imp.cancel') }}" id="cancel-form" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+  </form>
+</main>
+{% endblock %}

@@ -13,7 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Settings
 from .storage import Storage, StorageError, build_storage
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 
 csrf = CSRFProtect()
 
@@ -48,7 +48,7 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
         PERMANENT_SESSION_LIFETIME=dt.timedelta(days=14),
         PREFERRED_URL_SCHEME="https" if settings.is_production else "http",
         WTF_CSRF_TIME_LIMIT=None,
-        MAX_CONTENT_LENGTH=64 * 1024,
+        MAX_CONTENT_LENGTH=10 * 1024 * 1024,  # history imports upload .xlsx files
     )
     # Render / Cloud Run terminate TLS at a proxy; trust its X-Forwarded-* headers.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -58,12 +58,14 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
     csrf.init_app(app)
 
     from .auth import init_auth
+    from .import_views import bp as imp_bp
     from .templates_views import bp as tpl_bp
     from .views import bp as main_bp
 
     init_auth(app)
     app.register_blueprint(main_bp)
     app.register_blueprint(tpl_bp)
+    app.register_blueprint(imp_bp)
 
     @app.context_processor
     def inject_globals():
@@ -100,6 +102,7 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
         (400, "Bad request"),
         (404, "Not found"),
         (405, "Not allowed"),
+        (413, "File too large"),
         (500, "Something went wrong"),
     ):
 

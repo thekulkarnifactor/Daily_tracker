@@ -129,6 +129,28 @@
     render();
   }
 
+  // ---- Import: file picker / drop zone and select-all
+  const fileInput = document.getElementById("file");
+  if (fileInput) {
+    const zone = fileInput.closest(".dropzone");
+    const show = () => { $("dz-file").textContent = fileInput.files[0] ? fileInput.files[0].name : ""; };
+    fileInput.addEventListener("change", show);
+    ["dragenter", "dragover"].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add("is-over"); }));
+    ["dragleave", "drop"].forEach((ev) => zone.addEventListener(ev, () => zone.classList.remove("is-over")));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; show(); }
+    });
+  }
+  const toggleAll = document.getElementById("toggle-all");
+  if (toggleAll) {
+    const boxes = [...document.querySelectorAll(".month-check")];
+    const sync = () => { toggleAll.checked = boxes.every((b) => b.checked); };
+    toggleAll.addEventListener("change", () => boxes.forEach((b) => (b.checked = toggleAll.checked)));
+    boxes.forEach((b) => b.addEventListener("change", sync));
+    sync();
+  }
+
   // Auto-submit the month picker.
   document.querySelectorAll("form.js-autosubmit select").forEach((sel) =>
     sel.addEventListener("change", () => sel.form.submit())
