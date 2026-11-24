@@ -152,4 +152,5 @@
   </form>
 </dialog>
 <script type="application/json" id="templates-data">{{ templates | tojson }}</script>
+{% if prefill %}<script type="application/json" id="prefill-data">{{ prefill | tojson }}</script>{% endif %}
 {% endblock %}

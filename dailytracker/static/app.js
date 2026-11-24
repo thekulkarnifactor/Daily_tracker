@@ -87,6 +87,23 @@
     });
   }
 
+  // ---- Quick-add link: open a day with fields pre-filled (still needs Save)
+  const pre = document.getElementById("prefill-data");
+  if (pre && dialog) {
+    const p = JSON.parse(pre.textContent || "{}");
+    const cell = document.querySelector(`button.day[data-date="${p.day}"]`);
+    if (cell) {
+      openEntry(cell);
+      if (p.project) $("f-project").value = p.project;
+      if (p.details) $("f-details").value = p.details;
+      if (p.assignee) $("f-assignee").value = p.assignee;
+      if (p.category) { ensureOption($("f-category"), p.category); $("f-category").value = p.category; }
+      if (p.status) { ensureOption($("f-status"), p.status); $("f-status").value = p.status; }
+      $("f-title").textContent = `${cell.dataset.label} · review and save`;
+      history.replaceState(null, "", `?month=${p.day.slice(0, 7)}`); // so a refresh doesn't re-open it
+    }
+  }
+
   // Confirm before destructive form submits.
   document.querySelectorAll("form.js-confirm").forEach((form) =>
     form.addEventListener("submit", (e) => {

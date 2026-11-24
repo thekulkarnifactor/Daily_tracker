@@ -63,7 +63,10 @@ def _timeline() -> list[tuple[int, int]]:
 @login_required
 def dashboard():
     t = today()
+    prefill = _quick_add_prefill()
     ym = _parse_month(request.args.get("month") or request.args.get("sheet")) or (t.year, t.month)
+    if prefill:
+        ym = (prefill["day"].year, prefill["day"].month)
     year, month = ym
     entries = storage().get_month(year, month)
     tab = storage().find_tab(year, month)
@@ -88,7 +91,27 @@ def dashboard():
         today=t,
         backend=storage().name,
         templates=[t.to_dict() for t in storage().list_templates()],
+        prefill={**prefill, "day": prefill["day"].isoformat()} if prefill else None,
     )
+
+
+def _quick_add_prefill() -> dict | None:
+    """Quick-add link: ``/?day=2026-11-24&project=…&category=…&details=…&assignee=…&status=…``
+
+    Opens that day's dialog with the fields filled in. Nothing is saved until
+    the user presses Save, so the link is safe to share or bookmark.
+    """
+    raw = request.args.get("day")
+    if not raw:
+        return None
+    try:
+        day = dt.date.fromisoformat(raw)
+    except ValueError:
+        return None
+    if day.weekday() >= 5:
+        return None
+    fields = {k: (request.args.get(k) or "").strip()[:limit] for k, limit in MAX_LEN.items()}
+    return {"day": day, **{k: v for k, v in fields.items() if v}}
 
 
 def _form_date() -> dt.date:

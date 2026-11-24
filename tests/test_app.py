@@ -166,3 +166,13 @@ def test_get_on_form_urls_redirects_home(client):
 def test_unauthenticated_post_returns_to_dashboard_after_login(auth_app):
     resp = auth_app.test_client().post("/entry", data={"date": "2026-11-17", "project": "x"})
     assert "next=/" in resp.headers["Location"] and "entry" not in resp.headers["Location"]
+
+
+def test_quick_add_link_prefills_but_does_not_save(client, storage):
+    resp = client.get("/?day=2026-11-24&project=BnB&category=Core+Dev+-+Coding&details=1.+Schema&status=Done")
+    assert resp.status_code == 200
+    assert b'id="prefill-data"' in resp.data and b"November 2026" in resp.data
+    assert b'"day": "2026-11-24"' in resp.data and b'"project": "BnB"' in resp.data
+    assert not storage.get_entry(dt.date(2026, 11, 24)).has_content
+    assert b"prefill-data" not in client.get("/?day=2026-11-28&project=x").data  # weekend ignored
+    assert b"prefill-data" not in client.get("/?day=nope").data
