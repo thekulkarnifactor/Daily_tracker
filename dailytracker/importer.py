@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import secrets
 import tempfile
+import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .model import DayEntry, parse_tab_name
@@ -22,6 +25,8 @@ from .storage.excel import ExcelStorage
 
 Month = tuple[int, int]
 MonthDays = dict[Month, dict[dt.date, list[str]]]
+
+log = logging.getLogger(__name__)
 
 UPLOAD_TTL_SECONDS = 2 * 60 * 60
 _UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "dailytracker-imports")
@@ -106,16 +111,27 @@ def analyze(source: MonthDays, target: Storage) -> list[MonthPlan]:
     return plans
 
 
+ProgressFn = Callable[[int, int, str, int], None]  # (months done, months total, current label, days written)
+
+
 def run_import(
-    source: MonthDays, target: Storage, months: set[Month], overwrite: bool = False
+    source: MonthDays,
+    target: Storage,
+    months: set[Month],
+    overwrite: bool = False,
+    on_progress: ProgressFn | None = None,
 ) -> tuple[int, int]:
     """Write chosen months. Returns (days written, months touched).
 
     Without ``overwrite`` only days that are empty in the sheet are filled.
     Days whose content is already identical are never rewritten.
+    ``on_progress`` is called before each month and once at the end.
     """
+    selected = sorted(months & set(source))
     written = touched = 0
-    for ym in sorted(months & set(source)):
+    for index, ym in enumerate(selected):
+        if on_progress:
+            on_progress(index, len(selected), dt.date(*ym, 1).strftime("%b %Y"), written)
         plan = analyze({ym: source[ym]}, target)[0]
         chosen = set(plan.new) | ({c["date"] for c in plan.conflicts} if overwrite else set())
         if not chosen:
@@ -123,7 +139,93 @@ def run_import(
         prefill = {d: v for d, v in source[ym].items() if d.isoformat() in chosen}
         written += target.fill_month(*ym, prefill, overwrite=overwrite)
         touched += 1
+    if on_progress:
+        on_progress(len(selected), len(selected), "", written)
     return written, touched
+
+
+# -------------------------------------------------------------- background jobs
+
+
+@dataclass
+class ImportJob:
+    id: str
+    filename: str
+    total: int
+    first_month: str
+    status: str = "running"  # running | done | error
+    done: int = 0
+    current: str = ""
+    written: int = 0
+    touched: int = 0
+    error: str = ""
+    started: float = field(default_factory=time.time)
+    finished: float | None = None
+
+    def to_dict(self) -> dict:
+        percent = 100 if self.status == "done" else int(self.done * 100 / self.total) if self.total else 0
+        return {
+            "id": self.id,
+            "status": self.status,
+            "done": self.done,
+            "total": self.total,
+            "percent": percent,
+            "current": self.current,
+            "written": self.written,
+            "touched": self.touched,
+            "error": self.error,
+            "first_month": self.first_month,
+            "filename": self.filename,
+            "elapsed": round((self.finished or time.time()) - self.started, 1),
+        }
+
+
+_jobs: dict[str, ImportJob] = {}
+_jobs_lock = threading.Lock()
+
+
+def start_import_job(
+    source: MonthDays, target: Storage, months: set[Month], overwrite: bool, filename: str
+) -> ImportJob:
+    """Run ``run_import`` in a background thread and return a job to poll.
+
+    Jobs live in memory, which is fine for the single-process deployment
+    (gunicorn runs one worker with threads).
+    """
+    selected = sorted(months & set(source))
+    first = selected[0] if selected else min(months)
+    job = ImportJob(
+        id=secrets.token_urlsafe(12),
+        filename=filename,
+        total=len(selected),
+        first_month=f"{first[0]:04d}-{first[1]:02d}",
+    )
+    with _jobs_lock:
+        cutoff = time.time() - UPLOAD_TTL_SECONDS
+        for key in [k for k, j in _jobs.items() if j.finished and j.finished < cutoff]:
+            del _jobs[key]
+        _jobs[job.id] = job
+
+    def progress(done: int, total: int, current: str, written: int) -> None:
+        job.done, job.current, job.written = done, current, written
+
+    def work() -> None:
+        try:
+            job.written, job.touched = run_import(source, target, months, overwrite, on_progress=progress)
+            job.status = "done"
+        except Exception as exc:  # surfaced to the progress page
+            log.exception("import job %s failed", job.id)
+            job.status, job.error = "error", str(exc) or type(exc).__name__
+        finally:
+            job.finished = time.time()
+
+    threading.Thread(target=work, name=f"import-{job.id}", daemon=True).start()
+    return job
+
+
+def get_job(job_id: str) -> ImportJob | None:
+    with _jobs_lock:
+        return _jobs.get(job_id)
 
 
 # --------------------------------------------------------- staged uploads (web)

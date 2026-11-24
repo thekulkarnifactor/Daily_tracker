@@ -5,17 +5,18 @@ from __future__ import annotations
 import os
 import tempfile
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from .auth import current_user, login_required
 from .importer import (
     ImportFileError,
     analyze,
     discard_staged,
+    get_job,
     load_staged,
     read_workbook,
-    run_import,
     stage_upload,
+    start_import_job,
 )
 from .views import storage
 
@@ -117,12 +118,30 @@ def run():
         return redirect(url_for("imp.review", token=token))
 
     overwrite = request.form.get("mode") == "overwrite"
-    written, touched = run_import(months, storage(), chosen, overwrite=overwrite)
+    job = start_import_job(months, storage(), chosen, overwrite, filename)
     discard_staged(token)
-    days = f"{written} day{'s' if written != 1 else ''}"
-    flash(f"Imported {days} into {touched} month{'s' if touched != 1 else ''} from {filename}.", "success")
-    first = min(chosen)
-    return redirect(url_for("main.dashboard", month=f"{first[0]:04d}-{first[1]:02d}"))
+    return redirect(url_for("imp.progress", job_id=job.id))
+
+
+@bp.get("/import/progress/<job_id>")
+@login_required
+def progress(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        flash("That import is no longer available. Check your calendar to see what was imported.", "error")
+        return redirect(url_for("imp.start"))
+    return render_template(
+        "import_progress.html", user=current_user(), backend=storage().name, job=job.to_dict()
+    )
+
+
+@bp.get("/import/status/<job_id>")
+@login_required
+def status(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        return jsonify(status="missing"), 404
+    return jsonify(job.to_dict())
 
 
 @bp.post("/import/cancel")

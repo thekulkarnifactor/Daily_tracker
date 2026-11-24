@@ -72,3 +72,6 @@ button.day:hover{transform:none;border-color:var(--blue);}
   .nav a{white-space:nowrap;}
   .month-nav h1{font-size:1.5rem;}
 }
+.progress-pct{font-family:'Fraunces',Georgia,serif;font-weight:600;color:var(--blue);}
+.progress-stats .val{font-family:'Fraunces',Georgia,serif;font-weight:600;}
+.progress{background:#0B1813;}

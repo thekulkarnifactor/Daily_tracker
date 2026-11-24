@@ -151,6 +151,79 @@
     sync();
   }
 
+  // ---- Import: upload with a real progress bar, then "comparing" while the server analyses.
+  const setBar = (fill, bar, pct) => {
+    fill.style.width = `${pct}%`;
+    bar.setAttribute("aria-valuenow", String(Math.round(pct)));
+  };
+  const uploadForm = document.getElementById("upload-form");
+  if (uploadForm && window.XMLHttpRequest && window.FormData) {
+    uploadForm.addEventListener("submit", (e) => {
+      if (!$("file").files.length) return; // let the browser show "required"
+      e.preventDefault();
+      const box = $("upload-progress"), fill = $("up-fill"), bar = $("up-bar");
+      box.hidden = false;
+      $("up-submit").disabled = true;
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", uploadForm.action);
+      xhr.upload.addEventListener("progress", (ev) => {
+        if (!ev.lengthComputable) return;
+        const pct = (ev.loaded / ev.total) * 100;
+        setBar(fill, bar, pct);
+        $("up-pct").textContent = `${Math.round(pct)}%`;
+        if (pct >= 100) {
+          $("up-label").textContent = "Reading the file and comparing it with your sheet…";
+          $("up-pct").textContent = "";
+          fill.classList.add("is-running");
+        }
+      });
+      xhr.addEventListener("load", () => { window.location.href = xhr.responseURL || uploadForm.action; });
+      xhr.addEventListener("error", () => {
+        $("up-label").textContent = "Upload failed. Check your connection and try again.";
+        fill.classList.remove("is-running");
+        $("up-submit").disabled = false;
+      });
+      xhr.send(new FormData(uploadForm));
+    });
+  }
+  const runBtn = document.getElementById("run-import");
+  if (runBtn) runBtn.form.addEventListener("submit", () => { runBtn.disabled = true; runBtn.textContent = "Starting import…"; });
+
+  // ---- Import job: poll status and move the bar
+  const job = document.getElementById("import-progress");
+  if (job) {
+    const fill = $("imp-fill"), bar = $("imp-bar");
+    setBar(fill, bar, Number(fill.dataset.percent || 0));
+    const apply = (s) => {
+      setBar(fill, bar, s.percent);
+      $("imp-pct").textContent = `${s.percent}%`;
+      $("imp-count").textContent = `${s.done} of ${s.total} month${s.total === 1 ? "" : "s"}`;
+      $("imp-written").textContent = s.written;
+      $("imp-elapsed").textContent = `${s.elapsed}s`;
+      $("imp-now").textContent = s.status === "running" ? (s.current ? `Writing ${s.current}…` : "Starting…") : "";
+      if (s.status === "done") {
+        fill.classList.remove("is-running");
+        $("imp-title").textContent = "Import finished";
+        $("imp-summary").textContent = `Imported ${s.written} day${s.written === 1 ? "" : "s"} into ${s.touched} month${s.touched === 1 ? "" : "s"}.`;
+        $("imp-done").hidden = false;
+      } else if (s.status === "error") {
+        fill.classList.remove("is-running");
+        fill.classList.add("is-error");
+        $("imp-title").textContent = "Import stopped";
+        $("imp-error-msg").textContent = s.error;
+        $("imp-error").hidden = false;
+      }
+      return s.status === "running";
+    };
+    const poll = () =>
+      fetch(job.dataset.statusUrl, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((s) => { if (apply(s)) setTimeout(poll, 800); })
+        .catch(() => setTimeout(poll, 2000));
+    if (!$("imp-done").hidden || !$("imp-error").hidden) fill.classList.remove("is-running");
+    else poll();
+  }
+
   // Auto-submit the month picker.
   document.querySelectorAll("form.js-autosubmit select").forEach((sel) =>
     sel.addEventListener("change", () => sel.form.submit())

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Importing · Daily Tracker{% endblock %}
+{% block content %}
+{% set active = "import" %}{% include "_topbar.html" %}
+
+<main class="wrapper narrow">
+  <div class="page-head">
+    <h1 id="imp-title">{% if job.status == 'done' %}Import finished{% elif job.status == 'error' %}Import stopped{% else %}Importing…{% endif %}</h1>
+    <p class="muted">From <b>{{ job.filename }}</b> into your {% if backend == 'sheets' %}Google Sheet{% else %}workbook{% endif %}. You can leave this page; the import keeps running.</p>
+  </div>
+
+  <section class="panel progress-panel" id="import-progress"
+           data-status-url="{{ url_for('imp.status', job_id=job.id) }}"
+           data-calendar-url="{{ url_for('main.dashboard') }}">
+    <div class="progress-top">
+      <span class="progress-pct" id="imp-pct">{{ job.percent }}%</span>
+      <span class="muted" id="imp-count">{{ job.done }} of {{ job.total }} months</span>
+    </div>
+    <div class="progress" role="progressbar" aria-label="Import progress"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.percent }}" id="imp-bar">
+      <div class="progress-fill {% if job.status == 'running' %}is-running{% endif %}" id="imp-fill" data-percent="{{ job.percent }}"></div>
+    </div>
+    <p class="progress-now" id="imp-now" aria-live="polite">
+      {% if job.status == 'running' %}{% if job.current %}Writing {{ job.current }}…{% else %}Starting…{% endif %}{% endif %}
+    </p>
+
+    <div class="progress-stats">
+      <div><span class="lbl">Days written</span><span class="val c-green" id="imp-written">{{ job.written }}</span></div>
+      <div><span class="lbl">Elapsed</span><span class="val" id="imp-elapsed">{{ job.elapsed }}s</span></div>
+    </div>
+
+    <div class="progress-done" id="imp-done" {% if job.status != 'done' %}hidden{% endif %}>
+      <p id="imp-summary">Imported {{ job.written }} days into {{ job.touched }} months.</p>
+      <div class="form-actions">
+        <a class="btn btn-ghost" href="{{ url_for('imp.start') }}">Import another file</a>
+        <a class="btn btn-primary" id="imp-open" href="{{ url_for('main.dashboard', month=job.first_month) }}">Open calendar</a>
+      </div>
+    </div>
+    <div class="progress-error" id="imp-error" {% if job.status != 'error' %}hidden{% endif %}>
+      <p><b>The import stopped:</b> <span id="imp-error-msg">{{ job.error }}</span></p>
+      <p class="muted">Months finished before the error are saved. Fix the problem, then upload the file again; days already imported are skipped.</p>
+      <div class="form-actions">
+        <a class="btn btn-primary" href="{{ url_for('imp.start') }}">Back to import</a>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

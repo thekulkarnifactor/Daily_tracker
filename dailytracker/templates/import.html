@@ -11,7 +11,7 @@
   </div>
 
   <section class="panel">
-    <form method="post" action="{{ url_for('imp.preview') }}" enctype="multipart/form-data" class="upload-form">
+    <form method="post" action="{{ url_for('imp.preview') }}" enctype="multipart/form-data" class="upload-form" id="upload-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="dropzone" for="file">
         <span class="dz-title">Choose an .xlsx file</span>
@@ -19,8 +19,17 @@
         <span class="dz-file" id="dz-file"></span>
         <input id="file" name="file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
       </label>
+      <div class="upload-progress" id="upload-progress" hidden>
+        <div class="progress-top">
+          <span id="up-label">Uploading…</span>
+          <span class="muted" id="up-pct">0%</span>
+        </div>
+        <div class="progress" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="up-bar">
+          <div class="progress-fill" id="up-fill"></div>
+        </div>
+      </div>
       <div class="form-actions">
-        <button class="btn btn-primary" type="submit">Review import</button>
+        <button class="btn btn-primary" type="submit" id="up-submit">Review import</button>
       </div>
     </form>
   </section>

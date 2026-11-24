@@ -92,10 +92,56 @@ def test_import_flow(client, storage, source_file):
     assert page.status_code == 200 and b"Oct 2026" in page.data and b"Will create tab" in page.data
 
     resp = client.post("/import/run", data={"token": token, "months": ["2026-10"], "mode": "empty"})
-    assert resp.status_code == 302 and "month=2026-10" in resp.headers["Location"]
+    assert resp.status_code == 302 and "/import/progress/" in resp.headers["Location"]
+    job_id = resp.headers["Location"].rsplit("/", 1)[-1]
+    assert client.get(f"/import/progress/{job_id}").status_code == 200
+
+    status = _wait(client, job_id)
+    assert status["status"] == "done" and status["percent"] == 100
+    assert status["written"] == 3 and status["first_month"] == "2026-10"
     assert storage.get_entry(D(2026, 10, 5)).project == "EZ Jobs"
     assert storage.find_tab(2023, 9) is None
     assert client.get(f"/import/review/{token}").status_code == 302  # token used up
+
+
+def _wait(client, job_id, timeout=10):
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status = client.get(f"/import/status/{job_id}").get_json()
+        if status["status"] != "running":
+            return status
+        time.sleep(0.05)
+    raise AssertionError("import job did not finish")
+
+
+def test_progress_callback_and_job_errors(source_file, storage):
+    from dailytracker.importer import get_job, start_import_job
+
+    months, _ = read_workbook(source_file)
+    calls = []
+    run_import(months, storage, set(months), on_progress=lambda *a: calls.append(a))
+    assert [c[:2] for c in calls] == [(0, 2), (1, 2), (2, 2)]
+    assert calls[0][2] == "Sep 2023" and calls[-1][3] == 4
+
+    class Broken:
+        def find_tab(self, *a):
+            raise RuntimeError("Google said no")
+
+    job = start_import_job(months, Broken(), set(months), False, "x.xlsx")
+    import time
+
+    for _ in range(100):
+        if get_job(job.id).status != "running":
+            break
+        time.sleep(0.02)
+    assert get_job(job.id).status == "error" and "Google said no" in get_job(job.id).error
+
+
+def test_unknown_job(client):
+    assert client.get("/import/status/nope").status_code == 404
+    assert client.get("/import/progress/nope").status_code == 302
 
 
 def test_import_rejects_bad_files(client, tmp_path):
